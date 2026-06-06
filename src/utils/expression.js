@@ -9,6 +9,7 @@ class Tokenizer {
   tokenize() {
     while (this.pos < this.input.length) {
       const ch = this.input[this.pos];
+      const next = this.input[this.pos + 1];
 
       if (/\s/.test(ch)) {
         this.pos++;
@@ -31,6 +32,55 @@ class Tokenizer {
 
       if (/[a-zA-Z_]/.test(ch)) {
         this.readIdentifier();
+        continue;
+      }
+
+      if (ch === '!' && next === '=') {
+        this.tokens.push({ type: '!=', value: '!=' });
+        this.pos += 2;
+        continue;
+      }
+      if (ch === '=') {
+        if (next === '=') {
+          this.tokens.push({ type: '==', value: '==' });
+          this.pos += 2;
+          continue;
+        }
+        throw new Error(`Unexpected character: ${ch} at position ${this.pos}`);
+      }
+      if (ch === '>') {
+        if (next === '=') {
+          this.tokens.push({ type: '>=', value: '>=' });
+          this.pos += 2;
+          continue;
+        }
+        this.tokens.push({ type: '>', value: '>' });
+        this.pos++;
+        continue;
+      }
+      if (ch === '<') {
+        if (next === '=') {
+          this.tokens.push({ type: '<=', value: '<=' });
+          this.pos += 2;
+          continue;
+        }
+        this.tokens.push({ type: '<', value: '<' });
+        this.pos++;
+        continue;
+      }
+      if (ch === '&' && next === '&') {
+        this.tokens.push({ type: '&&', value: '&&' });
+        this.pos += 2;
+        continue;
+      }
+      if (ch === '|' && next === '|') {
+        this.tokens.push({ type: '||', value: '||' });
+        this.pos += 2;
+        continue;
+      }
+      if (ch === '!') {
+        this.tokens.push({ type: '!', value: '!' });
+        this.pos++;
         continue;
       }
 
@@ -132,11 +182,52 @@ class Parser {
   }
 
   parse() {
-    const result = this.parseExpr();
+    const result = this.parseOr();
     if (this.peek().type !== 'EOF') {
       throw new Error('Unexpected token after expression');
     }
     return result;
+  }
+
+  parseOr() {
+    let left = this.parseAnd();
+    while (this.peek().type === '||') {
+      const op = this.consume();
+      const right = this.parseAnd();
+      left = { type: 'Binary', op: op.value, left, right };
+    }
+    return left;
+  }
+
+  parseAnd() {
+    let left = this.parseEquality();
+    while (this.peek().type === '&&') {
+      const op = this.consume();
+      const right = this.parseEquality();
+      left = { type: 'Binary', op: op.value, left, right };
+    }
+    return left;
+  }
+
+  parseEquality() {
+    let left = this.parseComparison();
+    while (this.peek().type === '==' || this.peek().type === '!=') {
+      const op = this.consume();
+      const right = this.parseComparison();
+      left = { type: 'Binary', op: op.value, left, right };
+    }
+    return left;
+  }
+
+  parseComparison() {
+    let left = this.parseExpr();
+    while (this.peek().type === '>' || this.peek().type === '<' ||
+           this.peek().type === '>=' || this.peek().type === '<=') {
+      const op = this.consume();
+      const right = this.parseExpr();
+      left = { type: 'Binary', op: op.value, left, right };
+    }
+    return left;
   }
 
   parseExpr() {
@@ -162,7 +253,7 @@ class Parser {
   parseFactor() {
     const tok = this.peek();
 
-    if (tok.type === '+' || tok.type === '-') {
+    if (tok.type === '+' || tok.type === '-' || tok.type === '!') {
       this.consume();
       const operand = this.parseFactor();
       return { type: 'Unary', op: tok.value, operand };
@@ -183,10 +274,10 @@ class Parser {
       this.expect('(');
       const args = [];
       if (this.peek().type !== ')') {
-        args.push(this.parseExpr());
+        args.push(this.parseOr());
         while (this.peek().type === ',') {
           this.consume();
-          args.push(this.parseExpr());
+          args.push(this.parseOr());
         }
       }
       this.expect(')');
@@ -198,7 +289,7 @@ class Parser {
 
     if (tok.type === '(') {
       this.consume();
-      const expr = this.parseExpr();
+      const expr = this.parseOr();
       this.expect(')');
       return expr;
     }
@@ -212,6 +303,11 @@ class Evaluator {
     this.resolver = resolver;
   }
 
+  toBool(v) {
+    if (typeof v === 'boolean') return v;
+    return v !== 0;
+  }
+
   eval(ast) {
     switch (ast.type) {
       case 'Number':
@@ -220,7 +316,12 @@ class Evaluator {
         return this.resolver(ast.name);
       case 'Unary': {
         const v = this.eval(ast.operand);
-        return ast.op === '-' ? -v : v;
+        switch (ast.op) {
+          case '-': return -v;
+          case '+': return v;
+          case '!': return this.toBool(v) ? 0 : 1;
+          default: return v;
+        }
       }
       case 'Binary': {
         const l = this.eval(ast.left);
@@ -230,6 +331,14 @@ class Evaluator {
           case '-': return l - r;
           case '*': return l * r;
           case '/': return l / r;
+          case '>': return l > r ? 1 : 0;
+          case '<': return l < r ? 1 : 0;
+          case '>=': return l >= r ? 1 : 0;
+          case '<=': return l <= r ? 1 : 0;
+          case '==': return l === r ? 1 : 0;
+          case '!=': return l !== r ? 1 : 0;
+          case '&&': return (this.toBool(l) && this.toBool(r)) ? 1 : 0;
+          case '||': return (this.toBool(l) || this.toBool(r)) ? 1 : 0;
           default: throw new Error(`Unknown operator: ${ast.op}`);
         }
       }

@@ -140,6 +140,35 @@ function init() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_cth_tag_ts ON computed_tag_history(tag_id, timestamp);
+
+    CREATE TABLE IF NOT EXISTS interlocks (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      condition TEXT NOT NULL,
+      actions TEXT NOT NULL,
+      priority INTEGER NOT NULL DEFAULT 3,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      auto_reset INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS interlock_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      interlock_id TEXT NOT NULL,
+      interlock_name TEXT NOT NULL,
+      trigger_value REAL NOT NULL,
+      actions TEXT NOT NULL,
+      timestamp INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_il_events_ts ON interlock_events(timestamp);
+
+    CREATE TABLE IF NOT EXISTS sequences (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      steps TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
   `);
 }
 

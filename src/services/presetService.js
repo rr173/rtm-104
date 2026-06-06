@@ -2,6 +2,8 @@ const { get } = require('../db/database');
 const deviceService = require('./deviceService');
 const alarmService = require('./alarmService');
 const pollingService = require('./pollingService');
+const interlockService = require('./interlockService');
+const sequenceService = require('./sequenceService');
 const deviceStore = require('../store/deviceStore');
 
 const PRESET_DEVICES = [
@@ -125,9 +127,94 @@ async function setupPresetAlarms(deviceIds) {
   }
 }
 
+async function setupPresetInterlocks(deviceIds) {
+  const row = await get('SELECT COUNT(*) as cnt FROM interlocks');
+  const count = row ? row.cnt : 0;
+  if (count > 0) return;
+
+  if (!deviceIds) {
+    const devices = await deviceService.getAllDevices();
+    deviceIds = {};
+    for (const d of devices) {
+      deviceIds[d.name] = d.id;
+    }
+  }
+
+  if (deviceIds['液位计'] && deviceIds['变频器']) {
+    await interlockService.createInterlock({
+      name: '液位低停泵',
+      condition: `${deviceIds['液位计']}.reg0 < 1.0`,
+      actions: [
+        { deviceId: deviceIds['变频器'], address: 0, value: 0 }
+      ],
+      priority: 5,
+      enabled: true,
+      autoReset: false
+    });
+    console.log('预置联锁: 液位低停泵');
+  }
+
+  if (deviceIds['温控器']) {
+    await interlockService.createInterlock({
+      name: '温度超限关加热',
+      condition: `${deviceIds['温控器']}.reg0 > 90`,
+      actions: [
+        { deviceId: deviceIds['温控器'], address: 4, value: 0 }
+      ],
+      priority: 5,
+      enabled: true,
+      autoReset: false
+    });
+    console.log('预置联锁: 温度超限关加热');
+  }
+}
+
+async function setupPresetSequences(deviceIds) {
+  const row = await get('SELECT COUNT(*) as cnt FROM sequences');
+  const count = row ? row.cnt : 0;
+  if (count > 0) return;
+
+  if (!deviceIds) {
+    const devices = await deviceService.getAllDevices();
+    deviceIds = {};
+    for (const d of devices) {
+      deviceIds[d.name] = d.id;
+    }
+  }
+
+  if (deviceIds['变频器']) {
+    await sequenceService.createSequence({
+      name: '启动流程',
+      steps: [
+        {
+          stepNumber: 1,
+          actions: [
+            { deviceId: deviceIds['变频器'], address: 0, value: 20 }
+          ],
+          transitionCondition: `${deviceIds['变频器']}.reg2 >= 18`,
+          timeoutSeconds: 30,
+          timeoutTarget: 'abort'
+        },
+        {
+          stepNumber: 2,
+          actions: [
+            { deviceId: deviceIds['变频器'], address: 0, value: 50 }
+          ],
+          transitionCondition: `${deviceIds['变频器']}.reg2 >= 48`,
+          timeoutSeconds: 30,
+          timeoutTarget: 'abort'
+        }
+      ]
+    });
+    console.log('预置顺序程序: 启动流程');
+  }
+}
+
 async function setupPresetData() {
   const deviceIds = await setupPresetDevices();
   await setupPresetAlarms(deviceIds);
+  await setupPresetInterlocks(deviceIds);
+  await setupPresetSequences(deviceIds);
 }
 
 module.exports = {

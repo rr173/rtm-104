@@ -7,12 +7,16 @@ const pollingService = require('./services/pollingService');
 const computedTagService = require('./services/computedTagService');
 const presetService = require('./services/presetService');
 const alarmService = require('./services/alarmService');
+const interlockService = require('./services/interlockService');
+const sequenceService = require('./services/sequenceService');
 
 const devicesRouter = require('./routes/devices');
 const pollingRouter = require('./routes/polling');
 const alarmsRouter = require('./routes/alarms');
 const tagsRouter = require('./routes/tags');
 const dataRouter = require('./routes/data');
+const interlocksRouter = require('./routes/interlocks');
+const sequencesRouter = require('./routes/sequences');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -33,7 +37,9 @@ app.get('/', (req, res) => {
       polling: '/api/polling',
       alarms: '/api/alarms',
       tags: '/api/tags',
-      data: '/api/history and /api/snapshot'
+      data: '/api/history and /api/snapshot',
+      interlocks: '/api/interlocks',
+      sequences: '/api/sequences'
     }
   });
 });
@@ -43,6 +49,8 @@ app.use('/api/polling', pollingRouter);
 app.use('/api/alarms', alarmsRouter);
 app.use('/api/tags', tagsRouter);
 app.use('/api', dataRouter);
+app.use('/api/interlocks', interlocksRouter);
+app.use('/api/sequences', sequencesRouter);
 
 app.use((err, req, res, next) => {
   console.error('Server error:', err);
@@ -68,8 +76,12 @@ async function startup() {
     await pollingService.startPollingForAll();
     await computedTagService.startAllComputedTags();
     await alarmService.evaluateAllAlarms();
+    interlockService.startEngine();
+    sequenceService.startEngine();
     console.log('Modbus Gateway Service 启动完成');
     console.log(`预置数据: 温控器(high报警阈值80°C), 液位计(low报警阈值1m)`);
+    console.log(`预置联锁: 液位低停泵、温度超限关加热`);
+    console.log(`预置顺序程序: 启动流程`);
   } catch (e) {
     console.error('启动失败:', e);
     process.exit(1);
@@ -85,6 +97,8 @@ process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down...');
   pollingStore.clearAllTimers();
   require('./store/computedTagStore').clearAllTimers();
+  interlockService.stopEngine();
+  sequenceService.stopEngine();
   server.close(() => process.exit(0));
 });
 
@@ -92,6 +106,8 @@ process.on('SIGINT', () => {
   console.log('SIGINT received, shutting down...');
   pollingStore.clearAllTimers();
   require('./store/computedTagStore').clearAllTimers();
+  interlockService.stopEngine();
+  sequenceService.stopEngine();
   server.close(() => process.exit(0));
 });
 
