@@ -169,6 +169,24 @@ function init() {
       steps TEXT NOT NULL,
       created_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS recipes (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS recipe_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      recipe_id TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      address INTEGER NOT NULL,
+      value REAL NOT NULL,
+      UNIQUE(recipe_id, device_id, address)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_recipe_items_recipe ON recipe_items(recipe_id);
   `);
 }
 

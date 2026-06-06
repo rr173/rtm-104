@@ -17,6 +17,7 @@ const tagsRouter = require('./routes/tags');
 const dataRouter = require('./routes/data');
 const interlocksRouter = require('./routes/interlocks');
 const sequencesRouter = require('./routes/sequences');
+const recipesRouter = require('./routes/recipes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -39,7 +40,8 @@ app.get('/', (req, res) => {
       tags: '/api/tags',
       data: '/api/history and /api/snapshot',
       interlocks: '/api/interlocks',
-      sequences: '/api/sequences'
+      sequences: '/api/sequences',
+      recipes: '/api/recipes'
     }
   });
 });
@@ -51,6 +53,7 @@ app.use('/api/tags', tagsRouter);
 app.use('/api', dataRouter);
 app.use('/api/interlocks', interlocksRouter);
 app.use('/api/sequences', sequencesRouter);
+app.use('/api/recipes', recipesRouter);
 
 app.use((err, req, res, next) => {
   console.error('Server error:', err);
@@ -82,6 +85,7 @@ async function startup() {
     console.log(`预置数据: 温控器(high报警阈值80°C), 液位计(low报警阈值1m)`);
     console.log(`预置联锁: 液位低停泵、温度超限关加热`);
     console.log(`预置顺序程序: 启动流程`);
+    console.log(`预置配方: 产品A配方(温控60°C/变频30Hz)、产品B配方(温控80°C/变频50Hz)`);
   } catch (e) {
     console.error('启动失败:', e);
     process.exit(1);

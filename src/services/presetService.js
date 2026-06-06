@@ -4,6 +4,7 @@ const alarmService = require('./alarmService');
 const pollingService = require('./pollingService');
 const interlockService = require('./interlockService');
 const sequenceService = require('./sequenceService');
+const recipeService = require('./recipeService');
 const deviceStore = require('../store/deviceStore');
 
 const PRESET_DEVICES = [
@@ -210,11 +211,48 @@ async function setupPresetSequences(deviceIds) {
   }
 }
 
+async function setupPresetRecipes(deviceIds) {
+  const row = await get('SELECT COUNT(*) as cnt FROM recipes');
+  const count = row ? row.cnt : 0;
+  if (count > 0) return;
+
+  if (!deviceIds) {
+    const devices = await deviceService.getAllDevices();
+    deviceIds = {};
+    for (const d of devices) {
+      deviceIds[d.name] = d.id;
+    }
+  }
+
+  if (deviceIds['温控器'] && deviceIds['变频器']) {
+    await recipeService.createRecipe({
+      name: '产品A配方',
+      description: '生产A产品时的参数设定：温控器60°C，变频器30Hz',
+      items: [
+        { deviceId: deviceIds['温控器'], address: 2, value: 60.0 },
+        { deviceId: deviceIds['变频器'], address: 0, value: 30.0 }
+      ]
+    });
+    console.log('预置配方: 产品A配方');
+
+    await recipeService.createRecipe({
+      name: '产品B配方',
+      description: '生产B产品时的参数设定：温控器80°C，变频器50Hz',
+      items: [
+        { deviceId: deviceIds['温控器'], address: 2, value: 80.0 },
+        { deviceId: deviceIds['变频器'], address: 0, value: 50.0 }
+      ]
+    });
+    console.log('预置配方: 产品B配方');
+  }
+}
+
 async function setupPresetData() {
   const deviceIds = await setupPresetDevices();
   await setupPresetAlarms(deviceIds);
   await setupPresetInterlocks(deviceIds);
   await setupPresetSequences(deviceIds);
+  await setupPresetRecipes(deviceIds);
 }
 
 module.exports = {
