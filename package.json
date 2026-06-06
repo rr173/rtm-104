@@ -1,0 +1,15 @@
+{
+  "name": "modbus-gateway",
+  "version": "1.0.0",
+  "description": "Industrial Modbus Communication Gateway Service",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "node --watch src/app.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "sqlite3": "^5.1.7",
+    "uuid": "^9.0.0"
+  }
+}
