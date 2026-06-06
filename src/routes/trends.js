@@ -63,7 +63,7 @@ router.get('/curve/:deviceId/:regAddress', async (req, res) => {
     if (!result.success) {
       return res.status(400).json({ error: result.error });
     }
-    res.json(result);
+    res.json(result.points);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

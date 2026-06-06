@@ -3,6 +3,8 @@ class TrendStore {
     this.timers = new Map();
     this.stats = new Map();
     this.anomalyState = new Map();
+    this.normalBaselines = new Map();
+    this.recoveryCounts = new Map();
   }
 
   setTimer(configId, timer) {
@@ -50,11 +52,41 @@ class TrendStore {
     this.anomalyState.set(key, isAnomaly);
   }
 
+  setNormalBaseline(deviceId, regAddress, baseline) {
+    const key = `${deviceId}:${regAddress}`;
+    if (baseline) {
+      this.normalBaselines.set(key, baseline);
+    } else {
+      this.normalBaselines.delete(key);
+    }
+  }
+
+  getNormalBaseline(deviceId, regAddress) {
+    const key = `${deviceId}:${regAddress}`;
+    return this.normalBaselines.get(key) || null;
+  }
+
+  getRecoveryCount(deviceId, regAddress) {
+    const key = `${deviceId}:${regAddress}`;
+    return this.recoveryCounts.get(key) || 0;
+  }
+
+  setRecoveryCount(deviceId, regAddress, count) {
+    const key = `${deviceId}:${regAddress}`;
+    if (count > 0) {
+      this.recoveryCounts.set(key, count);
+    } else {
+      this.recoveryCounts.delete(key);
+    }
+  }
+
   removeConfig(configId, deviceId, regAddress) {
     this.clearTimer(configId);
     this.stats.delete(configId);
     const key = `${deviceId}:${regAddress}`;
     this.anomalyState.delete(key);
+    this.normalBaselines.delete(key);
+    this.recoveryCounts.delete(key);
   }
 }
 

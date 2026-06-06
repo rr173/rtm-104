@@ -110,6 +110,8 @@ async function deleteConfig(id) {
   return true;
 }
 
+const RECOVERY_CONFIRM_COUNT = 3;
+
 async function analyzeOnce(config) {
   const rows = await all(
     `SELECT value, timestamp FROM register_history
@@ -134,23 +136,65 @@ async function analyzeOnce(config) {
   const prevValue = values[values.length - 2];
   const deltaRate = prevValue !== 0 ? ((lastValue - prevValue) / Math.abs(prevValue)) * 100 : (lastValue !== 0 ? 100 : 0);
 
-  let isAnomaly = false;
-  let deviationRatio = 0;
-  if (stats.stddev > 0) {
-    deviationRatio = Math.abs(lastValue - stats.mean) / stats.stddev;
-    isAnomaly = deviationRatio > config.sensitivity;
+  const wasAnomaly = trendStore.isLastAnomaly(config.deviceId, config.regAddress);
+  const baseline = trendStore.getNormalBaseline(config.deviceId, config.regAddress);
+
+  let detectMean = stats.mean;
+  let detectStddev = stats.stddev;
+  if (wasAnomaly && baseline) {
+    detectMean = baseline.mean;
+    detectStddev = baseline.stddev;
   }
 
-  const wasAnomaly = trendStore.isLastAnomaly(config.deviceId, config.regAddress);
+  let isAnomaly = wasAnomaly;
+  let deviationRatio = 0;
+  let outOfRange = false;
+
+  if (detectStddev > 0) {
+    deviationRatio = Math.abs(lastValue - detectMean) / detectStddev;
+    outOfRange = deviationRatio > config.sensitivity;
+  } else if (wasAnomaly && baseline) {
+    outOfRange = Math.abs(lastValue - baseline.mean) > config.sensitivity * Math.max(baseline.stddev, 1e-9);
+  }
+
+  if (wasAnomaly) {
+    if (!outOfRange) {
+      const recCount = trendStore.getRecoveryCount(config.deviceId, config.regAddress) + 1;
+      if (recCount >= RECOVERY_CONFIRM_COUNT) {
+        isAnomaly = false;
+        trendStore.setNormalBaseline(config.deviceId, config.regAddress, null);
+        trendStore.setRecoveryCount(config.deviceId, config.regAddress, 0);
+      } else {
+        trendStore.setRecoveryCount(config.deviceId, config.regAddress, recCount);
+        isAnomaly = true;
+      }
+    } else {
+      trendStore.setRecoveryCount(config.deviceId, config.regAddress, 0);
+      isAnomaly = true;
+    }
+  } else {
+    if (outOfRange) {
+      isAnomaly = true;
+      trendStore.setNormalBaseline(config.deviceId, config.regAddress, {
+        mean: stats.mean,
+        stddev: Math.max(stats.stddev, 1e-9)
+      });
+    } else {
+      isAnomaly = false;
+    }
+  }
 
   if (isAnomaly && !wasAnomaly) {
     await run(
       `INSERT INTO trend_anomalies (timestamp, device_id, reg_address, anomaly_value, mean, stddev, deviation_ratio)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [Date.now(), config.deviceId, config.regAddress, lastValue, stats.mean, stats.stddev, deviationRatio]
+      [Date.now(), config.deviceId, config.regAddress, lastValue, detectMean, detectStddev, deviationRatio]
     );
   }
-  trendStore.setAnomalyState(config.deviceId, config.regAddress, isAnomaly);
+
+  if (isAnomaly !== wasAnomaly) {
+    trendStore.setAnomalyState(config.deviceId, config.regAddress, isAnomaly);
+  }
 
   trendStore.setStats(config.id, {
     mean: stats.mean,
@@ -304,15 +348,7 @@ async function getCurveData(deviceId, regAddress, windowStr) {
     });
   }
 
-  return {
-    success: true,
-    deviceId,
-    regAddress,
-    windowMs,
-    sensitivity: cfg.sensitivity,
-    windowSize: cfg.windowSize,
-    points
-  };
+  return { success: true, points };
 }
 
 module.exports = {
