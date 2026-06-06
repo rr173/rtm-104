@@ -5,7 +5,7 @@ const dataService = require('../services/dataService');
 router.get('/history/:deviceId/:regAddress', async (req, res) => {
   try {
     const { deviceId, regAddress } = req.params;
-    const { startTime, endTime, interval } = req.query;
+    const { startTime, endTime, interval, limit } = req.query;
 
     const st = startTime ? parseInt(startTime) : null;
     const et = endTime ? parseInt(endTime) : null;
@@ -15,7 +15,7 @@ router.get('/history/:deviceId/:regAddress', async (req, res) => {
       return res.status(400).json({ error: 'regAddress必须是数字' });
     }
 
-    const history = await dataService.getRegisterHistory(deviceId, regAddr, st, et, interval);
+    const history = await dataService.getRegisterHistory(deviceId, regAddr, st, et, interval, limit);
     res.json(history);
   } catch (e) {
     res.status(500).json({ error: e.message });

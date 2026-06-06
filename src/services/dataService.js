@@ -18,7 +18,7 @@ function parseIntervalMs(intervalStr) {
   }
 }
 
-async function getRegisterHistory(deviceId, regAddress, startTime, endTime, intervalStr) {
+async function getRegisterHistory(deviceId, regAddress, startTime, endTime, intervalStr, limit) {
   let sql = `
     SELECT value, timestamp, stale
     FROM register_history
@@ -36,46 +36,52 @@ async function getRegisterHistory(deviceId, regAddress, startTime, endTime, inte
   }
   sql += ' ORDER BY timestamp ASC';
 
-  const rows = await all(sql, params);
+  let rows = await all(sql, params);
 
   const intervalMs = parseIntervalMs(intervalStr);
-  if (!intervalMs || rows.length === 0) {
-    return rows;
-  }
+  if (intervalMs && rows.length > 0) {
+    const result = [];
+    let bucketStart = rows[0].timestamp;
+    let bucketSum = 0;
+    let bucketCount = 0;
 
-  const result = [];
-  let bucketStart = rows[0].timestamp;
-  let bucketSum = 0;
-  let bucketCount = 0;
-
-  for (const row of rows) {
-    if (row.timestamp >= bucketStart + intervalMs) {
-      if (bucketCount > 0) {
-        result.push({
-          value: bucketSum / bucketCount,
-          timestamp: bucketStart,
-          stale: 0
-        });
+    for (const row of rows) {
+      if (row.timestamp >= bucketStart + intervalMs) {
+        if (bucketCount > 0) {
+          result.push({
+            value: bucketSum / bucketCount,
+            timestamp: bucketStart,
+            stale: 0
+          });
+        }
+        while (row.timestamp >= bucketStart + intervalMs) {
+          bucketStart += intervalMs;
+        }
+        bucketSum = 0;
+        bucketCount = 0;
       }
-      while (row.timestamp >= bucketStart + intervalMs) {
-        bucketStart += intervalMs;
-      }
-      bucketSum = 0;
-      bucketCount = 0;
+      bucketSum += row.value;
+      bucketCount++;
     }
-    bucketSum += row.value;
-    bucketCount++;
+
+    if (bucketCount > 0) {
+      result.push({
+        value: bucketSum / bucketCount,
+        timestamp: bucketStart,
+        stale: 0
+      });
+    }
+    rows = result;
   }
 
-  if (bucketCount > 0) {
-    result.push({
-      value: bucketSum / bucketCount,
-      timestamp: bucketStart,
-      stale: 0
-    });
+  if (limit) {
+    const lim = Math.min(parseInt(limit) || 1000, 10000);
+    if (rows.length > lim) {
+      rows = rows.slice(-lim);
+    }
   }
 
-  return result;
+  return rows;
 }
 
 async function getSnapshot() {

@@ -12,7 +12,8 @@ class DeviceStore {
     }
 
     registersDef.forEach(reg => {
-      writeTypedValue(regSpace, reg.address, reg.dataType, 0);
+      const dataType = reg.dataType || reg.data_type;
+      writeTypedValue(regSpace, reg.address, dataType, 0);
     });
 
     this.devices.set(deviceId, {
@@ -75,11 +76,12 @@ class DeviceStore {
     const d = this.devices.get(deviceId);
     if (!d) return [];
     return registersDef.map(reg => {
-      const { value, stale } = this.getRegisterValue(deviceId, reg.address, reg.dataType);
+      const dataType = reg.dataType || reg.data_type;
+      const { value, stale } = this.getRegisterValue(deviceId, reg.address, dataType);
       return {
         address: reg.address,
         name: reg.name,
-        dataType: reg.dataType,
+        dataType: dataType,
         value,
         stale: stale || false,
         unit: reg.unit,
