@@ -5,6 +5,7 @@ const pollingService = require('./pollingService');
 const interlockService = require('./interlockService');
 const sequenceService = require('./sequenceService');
 const recipeService = require('./recipeService');
+const trendService = require('./trendService');
 const deviceStore = require('../store/deviceStore');
 
 const PRESET_DEVICES = [
@@ -247,12 +248,51 @@ async function setupPresetRecipes(deviceIds) {
   }
 }
 
+async function setupPresetTrends(deviceIds) {
+  const row = await get('SELECT COUNT(*) as cnt FROM trend_configs');
+  const count = row ? row.cnt : 0;
+  if (count > 0) return;
+
+  if (!deviceIds) {
+    const devices = await deviceService.getAllDevices();
+    deviceIds = {};
+    for (const d of devices) {
+      deviceIds[d.name] = d.id;
+    }
+  }
+
+  if (deviceIds['温控器']) {
+    await trendService.createConfig({
+      deviceId: deviceIds['温控器'],
+      regAddress: 0,
+      windowSize: 50,
+      sensitivity: 3.0,
+      intervalMs: 2000,
+      enabled: true
+    });
+    console.log('预置趋势分析: 温控器-当前温度');
+  }
+
+  if (deviceIds['变频器']) {
+    await trendService.createConfig({
+      deviceId: deviceIds['变频器'],
+      regAddress: 2,
+      windowSize: 50,
+      sensitivity: 3.0,
+      intervalMs: 2000,
+      enabled: true
+    });
+    console.log('预置趋势分析: 变频器-实际频率');
+  }
+}
+
 async function setupPresetData() {
   const deviceIds = await setupPresetDevices();
   await setupPresetAlarms(deviceIds);
   await setupPresetInterlocks(deviceIds);
   await setupPresetSequences(deviceIds);
   await setupPresetRecipes(deviceIds);
+  await setupPresetTrends(deviceIds);
 }
 
 module.exports = {

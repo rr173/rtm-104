@@ -212,6 +212,34 @@ function init() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_rei_execution ON recipe_execution_items(execution_id);
+
+    CREATE TABLE IF NOT EXISTS trend_configs (
+      id TEXT PRIMARY KEY,
+      device_id TEXT NOT NULL,
+      reg_address INTEGER NOT NULL,
+      window_size INTEGER NOT NULL DEFAULT 50,
+      sensitivity REAL NOT NULL DEFAULT 3.0,
+      interval_ms INTEGER NOT NULL DEFAULT 2000,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      UNIQUE(device_id, reg_address)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_trend_cfg_dev ON trend_configs(device_id);
+
+    CREATE TABLE IF NOT EXISTS trend_anomalies (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp INTEGER NOT NULL,
+      device_id TEXT NOT NULL,
+      reg_address INTEGER NOT NULL,
+      anomaly_value REAL NOT NULL,
+      mean REAL NOT NULL,
+      stddev REAL NOT NULL,
+      deviation_ratio REAL NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_trend_anom_dev_ts ON trend_anomalies(device_id, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_trend_anom_ts ON trend_anomalies(timestamp);
   `);
 }
 
