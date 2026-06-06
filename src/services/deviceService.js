@@ -169,6 +169,17 @@ function simulateFault(deviceId, times) {
   return { success: true };
 }
 
+function setDeviceStatus(deviceId, status) {
+  if (!deviceStore.hasDevice(deviceId)) {
+    return { success: false, error: '设备不存在' };
+  }
+  if (!['online', 'offline', 'fault'].includes(status)) {
+    return { success: false, error: '状态必须是online/offline/fault之一' };
+  }
+  deviceStore.setStatus(deviceId, status);
+  return { success: true };
+}
+
 async function getDeviceRegisters(deviceId) {
   return await all('SELECT * FROM registers WHERE device_id = ? ORDER BY address', [deviceId]);
 }
@@ -183,5 +194,6 @@ module.exports = {
   writeMultipleRegisters,
   simulateRegisterValue,
   simulateFault,
+  setDeviceStatus,
   getDeviceRegisters
 };

@@ -91,6 +91,18 @@ router.put('/:id/simulate-fault', (req, res) => {
   res.json(result);
 });
 
+router.put('/:id/status', (req, res) => {
+  const { status } = req.body;
+  if (!status) {
+    return res.status(400).json({ error: '缺少status参数' });
+  }
+  const result = deviceService.setDeviceStatus(req.params.id, status);
+  if (!result.success) {
+    return res.status(400).json({ error: result.error });
+  }
+  res.json(result);
+});
+
 router.post('/:id/registers/simulate', async (req, res) => {
   try {
     const { address, value } = req.body;

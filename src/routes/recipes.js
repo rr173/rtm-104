@@ -23,6 +23,15 @@ router.get('/', async (req, res) => {
   }
 });
 
+router.get('/history', async (req, res) => {
+  try {
+    const history = await recipeService.getExecutionHistory(req.query.limit);
+    res.json(history);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get('/:id', async (req, res) => {
   try {
     const recipe = await recipeService.getRecipeById(req.params.id);
@@ -67,7 +76,8 @@ router.post('/:id/apply', async (req, res) => {
       return res.status(code).json({
         error: result.error,
         failedItem: result.failedItem,
-        rolledBack: result.rolledBack
+        rolledBack: result.rolledBack,
+        executionId: result.executionId
       });
     }
     res.json(result);
@@ -83,6 +93,15 @@ router.get('/:id/validate', async (req, res) => {
       return res.status(404).json({ error: result.error });
     }
     res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/:id/history', async (req, res) => {
+  try {
+    const history = await recipeService.getRecipeExecutions(req.params.id, req.query.limit);
+    res.json(history);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

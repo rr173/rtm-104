@@ -187,6 +187,31 @@ function init() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_recipe_items_recipe ON recipe_items(recipe_id);
+
+    CREATE TABLE IF NOT EXISTS recipe_executions (
+      id TEXT PRIMARY KEY,
+      recipe_id TEXT NOT NULL,
+      recipe_name TEXT NOT NULL,
+      status TEXT NOT NULL,
+      executed_at INTEGER NOT NULL,
+      error TEXT,
+      rolled_back INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_recipe_exec_ts ON recipe_executions(executed_at);
+
+    CREATE TABLE IF NOT EXISTS recipe_execution_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      execution_id TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      address INTEGER NOT NULL,
+      target_value REAL NOT NULL,
+      original_value REAL NOT NULL,
+      final_value REAL NOT NULL,
+      write_status TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_rei_execution ON recipe_execution_items(execution_id);
   `);
 }
 
