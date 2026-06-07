@@ -59,6 +59,9 @@ router.post('/:id/acknowledge', async (req, res) => {
     if (!result.success) {
       return res.status(404).json({ error: result.error });
     }
+    if (result.alreadyAcknowledged) {
+      return res.status(409).json({ error: '该报警已被确认', alreadyAcknowledged: true });
+    }
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: e.message });

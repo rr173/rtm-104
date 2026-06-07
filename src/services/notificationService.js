@@ -207,41 +207,52 @@ async function getStats() {
 
 async function scanForEscalations() {
   const now = Date.now();
-  const pendingNotifications = await all(
-    `SELECT n.*, a.triggered_at, a.acknowledged, ar.escalate_after_seconds
-     FROM notifications n
-     JOIN alarms a ON n.alarm_id = a.id
+  const unacknowledgedAlarms = await all(
+    `SELECT a.*, d.name as device_name, r.name as reg_name, ar.escalate_after_seconds
+     FROM alarms a
      JOIN alarm_rules ar ON a.rule_id = ar.id
-     WHERE n.status = 'pending'
-       AND n.is_escalation = 0
+     JOIN devices d ON a.device_id = d.id
+     LEFT JOIN registers r ON a.device_id = r.device_id AND a.reg_address = r.address
+     WHERE a.active = 1
        AND a.acknowledged = 0
        AND ar.escalate_after_seconds > 0`
   );
 
-  for (const notif of pendingNotifications) {
-    const elapsedMs = now - notif.triggered_at;
+  for (const alarm of unacknowledgedAlarms) {
+    const elapsedMs = now - alarm.triggered_at;
     const elapsedSeconds = elapsedMs / 1000;
 
-    if (elapsedSeconds >= notif.escalate_after_seconds) {
+    if (elapsedSeconds >= alarm.escalate_after_seconds) {
       const alreadyEscalated = await get(
         'SELECT COUNT(*) as count FROM notifications WHERE alarm_id = ? AND is_escalation = 1',
-        [notif.alarm_id]
+        [alarm.id]
       );
 
       if (alreadyEscalated.count === 0) {
-        await run('UPDATE notifications SET status = ? WHERE id = ?', ['escalated', notif.id]);
+        const originalNotif = await get(
+          'SELECT * FROM notifications WHERE alarm_id = ? AND is_escalation = 0 ORDER BY created_at ASC LIMIT 1',
+          [alarm.id]
+        );
+
+        if (originalNotif) {
+          await run('UPDATE notifications SET status = ? WHERE id = ?', ['escalated', originalNotif.id]);
+        }
+
+        const deviceName = alarm.device_name;
+        const regName = alarm.reg_name || `reg${alarm.reg_address}`;
+
         await createNotification(
           {
-            id: notif.alarm_id,
-            current_value: notif.current_value,
-            threshold: notif.threshold,
-            alarm_type: notif.alarm_type
+            id: alarm.id,
+            current_value: alarm.current_value,
+            threshold: alarm.threshold,
+            alarm_type: alarm.alarm_type
           },
-          notif.device_name,
-          notif.reg_name,
+          deviceName,
+          regName,
           'both',
           true,
-          notif.id
+          originalNotif ? originalNotif.id : null
         );
       }
     }
