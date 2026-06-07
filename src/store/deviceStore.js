@@ -5,7 +5,7 @@ class DeviceStore {
     this.devices = new Map();
   }
 
-  addDevice(deviceId, registersDef) {
+  addDevice(deviceId, registersDef, firmwareVersion = '1.0.0') {
     const regSpace = new Map();
     for (let i = 0; i < 1000; i++) {
       regSpace.set(i, 0);
@@ -21,8 +21,19 @@ class DeviceStore {
       status: 'online',
       staleMap: new Map(),
       lastValidSnapshot: null,
-      simulatedFaultRemaining: 0
+      simulatedFaultRemaining: 0,
+      firmwareVersion: firmwareVersion
     });
+  }
+
+  getFirmwareVersion(deviceId) {
+    const d = this.devices.get(deviceId);
+    return d ? d.firmwareVersion : null;
+  }
+
+  setFirmwareVersion(deviceId, version) {
+    const d = this.devices.get(deviceId);
+    if (d) d.firmwareVersion = version;
   }
 
   hasDevice(deviceId) {

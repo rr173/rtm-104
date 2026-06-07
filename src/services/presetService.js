@@ -6,6 +6,7 @@ const interlockService = require('./interlockService');
 const sequenceService = require('./sequenceService');
 const recipeService = require('./recipeService');
 const trendService = require('./trendService');
+const firmwareService = require('./firmwareService');
 const deviceStore = require('../store/deviceStore');
 
 const PRESET_DEVICES = [
@@ -286,7 +287,32 @@ async function setupPresetTrends(deviceIds) {
   }
 }
 
+const PRESET_FIRMWARE = [
+  { version: '1.0.0', description: '初始稳定版本，基础功能完整' },
+  { version: '1.1.0', description: '修复已知Bug，优化Modbus通讯稳定性' },
+  { version: '2.0.0', description: '重大版本升级，新增OTA升级、趋势分析和配方管理功能' }
+];
+
+async function setupPresetFirmware() {
+  const row = await get('SELECT COUNT(*) as cnt FROM firmware');
+  const count = row ? row.cnt : 0;
+  if (count > 0) return;
+
+  for (const fw of PRESET_FIRMWARE) {
+    const result = await firmwareService.uploadFirmware({
+      version: fw.version,
+      description: fw.description
+    });
+    if (result.success) {
+      console.log(`预置固件版本: ${fw.version}`);
+    } else {
+      console.error('预置固件版本失败:', fw.version, result.error);
+    }
+  }
+}
+
 async function setupPresetData() {
+  await setupPresetFirmware();
   const deviceIds = await setupPresetDevices();
   await setupPresetAlarms(deviceIds);
   await setupPresetInterlocks(deviceIds);

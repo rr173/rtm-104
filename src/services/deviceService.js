@@ -87,6 +87,7 @@ async function getDeviceById(id) {
     name: dev.name,
     slaveId: dev.slave_id,
     status: deviceStore.getStatus(id) || dev.status,
+    firmwareVersion: deviceStore.getFirmwareVersion(id) || dev.firmware_version || '1.0.0',
     createdAt: dev.created_at,
     registers
   };
@@ -102,6 +103,7 @@ async function getDeviceDetail(id) {
     name: dev.name,
     slaveId: dev.slaveId,
     status: dev.status,
+    firmwareVersion: dev.firmwareVersion,
     createdAt: dev.createdAt,
     registers: registerValues
   };
@@ -114,6 +116,7 @@ async function getAllDevices() {
     name: d.name,
     slaveId: d.slave_id,
     status: deviceStore.getStatus(d.id) || d.status,
+    firmwareVersion: deviceStore.getFirmwareVersion(d.id) || d.firmware_version || '1.0.0',
     createdAt: d.created_at
   }));
 }

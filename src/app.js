@@ -11,6 +11,8 @@ const notificationService = require('./services/notificationService');
 const interlockService = require('./services/interlockService');
 const sequenceService = require('./services/sequenceService');
 const trendService = require('./services/trendService');
+const firmwareService = require('./services/firmwareService');
+const otaService = require('./services/otaService');
 
 const devicesRouter = require('./routes/devices');
 const pollingRouter = require('./routes/polling');
@@ -23,6 +25,8 @@ const sequencesRouter = require('./routes/sequences');
 const recipesRouter = require('./routes/recipes');
 const trendsRouter = require('./routes/trends');
 const replayRouter = require('./routes/replay');
+const firmwareRouter = require('./routes/firmware');
+const otaRouter = require('./routes/ota');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -50,7 +54,9 @@ app.get('/', (req, res) => {
       recipes: '/api/recipes',
       trends: '/api/trends',
       replay: '/api/replay',
-      compare: '/api/compare'
+      compare: '/api/compare',
+      firmware: '/api/firmware',
+      ota: '/api/ota'
     }
   });
 });
@@ -66,6 +72,8 @@ app.use('/api/sequences', sequencesRouter);
 app.use('/api/recipes', recipesRouter);
 app.use('/api/trends', trendsRouter);
 app.use('/api/replay', replayRouter);
+app.use('/api/firmware', firmwareRouter);
+app.use('/api/ota', otaRouter);
 
 app.use((err, req, res, next) => {
   console.error('Server error:', err);
@@ -73,10 +81,10 @@ app.use((err, req, res, next) => {
 });
 
 async function restoreDevicesFromDB() {
-  const devices = await all('SELECT id FROM devices');
+  const devices = await all('SELECT id, firmware_version FROM devices');
   for (const d of devices) {
     const regs = await deviceService.getDeviceRegisters(d.id);
-    deviceStore.addDevice(d.id, regs);
+    deviceStore.addDevice(d.id, regs, d.firmware_version || '1.0.0');
     pollingStore.initDevice(d.id);
   }
   console.log(`从数据库恢复 ${devices.length} 台设备`);
@@ -87,6 +95,10 @@ async function startup() {
     await init();
     console.log('数据库初始化完成');
     await restoreDevicesFromDB();
+    const fwCount = await firmwareService.loadFirmwareFromDB();
+    console.log(`从数据库加载 ${fwCount} 个固件版本`);
+    const otaCount = await otaService.loadOtaHistoryFromDB();
+    console.log(`从数据库加载 ${otaCount} 条OTA升级历史`);
     await presetService.setupPresetData();
     await pollingService.startPollingForAll();
     await computedTagService.startAllComputedTags();
@@ -101,6 +113,7 @@ async function startup() {
     console.log(`预置顺序程序: 启动流程`);
     console.log(`预置配方: 产品A配方(温控60°C/变频30Hz)、产品B配方(温控80°C/变频50Hz)`);
     console.log(`预置趋势分析: 温控器当前温度(窗口50/3-sigma/2s)、变频器实际频率(窗口50/3-sigma/2s)`);
+    console.log(`预置固件版本: 1.0.0/1.1.0/2.0.0, 设备初始版本1.0.0`);
   } catch (e) {
     console.error('启动失败:', e);
     process.exit(1);
@@ -116,6 +129,7 @@ process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down...');
   pollingStore.clearAllTimers();
   require('./store/computedTagStore').clearAllTimers();
+  require('./store/otaStore').clearAllTimers();
   interlockService.stopEngine();
   sequenceService.stopEngine();
   notificationService.stopEngine();
@@ -127,6 +141,7 @@ process.on('SIGINT', () => {
   console.log('SIGINT received, shutting down...');
   pollingStore.clearAllTimers();
   require('./store/computedTagStore').clearAllTimers();
+  require('./store/otaStore').clearAllTimers();
   interlockService.stopEngine();
   sequenceService.stopEngine();
   notificationService.stopEngine();

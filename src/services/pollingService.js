@@ -2,6 +2,7 @@ const { run, get, all } = require('../db/database');
 const deviceStore = require('../store/deviceStore');
 const pollingStore = require('../store/pollingStore');
 const deviceService = require('./deviceService');
+const otaService = require('./otaService');
 const { getRegisterSpan } = require('../utils/modbus');
 
 function validateConfig(body) {
@@ -101,10 +102,12 @@ async function setPollingConfig(body) {
   pollingStore.clearTimer(body.deviceId);
   pollingStore.initDevice(body.deviceId);
 
-  if (enabled) {
+  if (enabled && !otaService.isDeviceUpgrading(body.deviceId)) {
     const timer = setInterval(async () => {
       try {
-        await doPoll(body.deviceId);
+        if (!otaService.isDeviceUpgrading(body.deviceId)) {
+          await doPoll(body.deviceId);
+        }
       } catch (e) {
         console.error('Poll error:', e);
       }
@@ -113,7 +116,11 @@ async function setPollingConfig(body) {
     pollingStore.setTimer(body.deviceId, timer);
 
     setTimeout(async () => {
-      try { await doPoll(body.deviceId); } catch (e) {}
+      try {
+        if (!otaService.isDeviceUpgrading(body.deviceId)) {
+          await doPoll(body.deviceId);
+        }
+      } catch (e) {}
     }, 100);
   }
 

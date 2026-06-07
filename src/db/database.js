@@ -56,16 +56,22 @@ function serialize(fn) {
 }
 
 async function migrate() {
-  const columns = await all("PRAGMA table_info(alarm_rules)");
-  const colNames = columns.map(c => c.name);
-  if (!colNames.includes('notify_channel')) {
+  const alarmColumns = await all("PRAGMA table_info(alarm_rules)");
+  const alarmColNames = alarmColumns.map(c => c.name);
+  if (!alarmColNames.includes('notify_channel')) {
     await run("ALTER TABLE alarm_rules ADD COLUMN notify_channel TEXT NOT NULL DEFAULT 'log'");
   }
-  if (!colNames.includes('escalate_after_seconds')) {
+  if (!alarmColNames.includes('escalate_after_seconds')) {
     await run("ALTER TABLE alarm_rules ADD COLUMN escalate_after_seconds INTEGER NOT NULL DEFAULT 0");
   }
-  if (!colNames.includes('webhook_url')) {
+  if (!alarmColNames.includes('webhook_url')) {
     await run("ALTER TABLE alarm_rules ADD COLUMN webhook_url TEXT");
+  }
+
+  const deviceColumns = await all("PRAGMA table_info(devices)");
+  const deviceColNames = deviceColumns.map(c => c.name);
+  if (!deviceColNames.includes('firmware_version')) {
+    await run("ALTER TABLE devices ADD COLUMN firmware_version TEXT NOT NULL DEFAULT '1.0.0'");
   }
 }
 
@@ -77,8 +83,34 @@ function init() {
       name TEXT NOT NULL,
       slave_id INTEGER NOT NULL,
       status TEXT NOT NULL DEFAULT 'online',
+      firmware_version TEXT NOT NULL DEFAULT '1.0.0',
       created_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS firmware (
+      id TEXT PRIMARY KEY,
+      version TEXT NOT NULL UNIQUE,
+      description TEXT,
+      file_size INTEGER NOT NULL DEFAULT 0,
+      checksum TEXT,
+      uploaded_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS ota_upgrades (
+      id TEXT PRIMARY KEY,
+      device_id TEXT NOT NULL,
+      firmware_id TEXT NOT NULL,
+      firmware_version TEXT NOT NULL,
+      status TEXT NOT NULL,
+      stage TEXT,
+      progress INTEGER NOT NULL DEFAULT 0,
+      error_message TEXT,
+      started_at INTEGER NOT NULL,
+      finished_at INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ota_device ON ota_upgrades(device_id, started_at);
+    CREATE INDEX IF NOT EXISTS idx_ota_status ON ota_upgrades(status);
 
     CREATE TABLE IF NOT EXISTS registers (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
