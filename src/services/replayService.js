@@ -111,8 +111,8 @@ async function saveReport() {
   return { alarms, interlocks };
 }
 
-function stopPolling() {
-  const configs = pollingService.getAllConfigs();
+async function stopPolling() {
+  const configs = await pollingService.getAllConfigs();
   replayState.pollingConfigs = configs.filter(c => c.enabled);
   pollingStore.clearAllTimers();
 }
@@ -180,7 +180,7 @@ async function startReplay(body) {
 
   await cacheRegisters(body.deviceIds);
 
-  stopPolling();
+  await stopPolling();
 
   replayState.isRunning = true;
   replayState.timer = null;
@@ -270,7 +270,7 @@ async function getStatus() {
 
   let triggeredAlarmCount = 0;
   let triggeredInterlockCount = 0;
-  if (replayState.isRunning) {
+  if (replayState.startedAt > 0) {
     try {
       triggeredAlarmCount = await getCurrentAlarmCount();
       triggeredInterlockCount = await getCurrentInterlockCount();
