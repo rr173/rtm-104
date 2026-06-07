@@ -327,6 +327,67 @@ function init() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_replay_reports_ts ON replay_reports(started_at);
+
+    CREATE TABLE IF NOT EXISTS work_shifts (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      start_hour INTEGER NOT NULL,
+      start_minute INTEGER NOT NULL,
+      end_hour INTEGER NOT NULL,
+      end_minute INTEGER NOT NULL,
+      cross_day INTEGER NOT NULL DEFAULT 0,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS energy_bindings (
+      id TEXT PRIMARY KEY,
+      device_id TEXT NOT NULL,
+      power_reg_address INTEGER NOT NULL,
+      rated_power REAL NOT NULL DEFAULT 0,
+      load_threshold REAL NOT NULL DEFAULT 0,
+      threshold_kwh REAL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      UNIQUE(device_id, power_reg_address)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_energy_binding_dev ON energy_bindings(device_id);
+
+    CREATE TABLE IF NOT EXISTS shift_energy_stats (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      device_id TEXT NOT NULL,
+      shift_id TEXT NOT NULL,
+      shift_date TEXT NOT NULL,
+      energy_kwh REAL NOT NULL DEFAULT 0,
+      runtime_seconds REAL NOT NULL DEFAULT 0,
+      avg_load_rate REAL NOT NULL DEFAULT 0,
+      peak_power REAL NOT NULL DEFAULT 0,
+      sample_count INTEGER NOT NULL DEFAULT 0,
+      start_time INTEGER NOT NULL,
+      end_time INTEGER,
+      completed INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(device_id, shift_id, shift_date)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_shift_stats_date ON shift_energy_stats(shift_date);
+    CREATE INDEX IF NOT EXISTS idx_shift_stats_dev ON shift_energy_stats(device_id, shift_date);
+
+    CREATE TABLE IF NOT EXISTS energy_alarms (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      device_id TEXT NOT NULL,
+      shift_id TEXT NOT NULL,
+      shift_date TEXT NOT NULL,
+      binding_id TEXT NOT NULL,
+      energy_kwh REAL NOT NULL,
+      threshold_kwh REAL NOT NULL,
+      triggered_at INTEGER NOT NULL,
+      acknowledged INTEGER NOT NULL DEFAULT 0,
+      acknowledged_at INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_energy_alarm_shift ON energy_alarms(device_id, shift_id, shift_date);
+    CREATE INDEX IF NOT EXISTS idx_energy_alarm_ts ON energy_alarms(triggered_at);
   `);
     await migrate();
   });

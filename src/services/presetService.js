@@ -8,6 +8,8 @@ const recipeService = require('./recipeService');
 const trendService = require('./trendService');
 const firmwareService = require('./firmwareService');
 const deviceStore = require('../store/deviceStore');
+const energyService = require('./energyService');
+const { all } = require('../db/database');
 
 const PRESET_DEVICES = [
   {
@@ -17,13 +19,15 @@ const PRESET_DEVICES = [
       { address: 0, name: '当前温度', dataType: 'float32', rw: 'RO', unit: '°C', description: '实时温度测量值' },
       { address: 2, name: '设定温度', dataType: 'float32', rw: 'RW', unit: '°C', description: '目标温度设定值' },
       { address: 4, name: '加热输出', dataType: 'uint16', rw: 'RO', unit: '%', description: '加热器输出占空比' },
-      { address: 5, name: '运行状态', dataType: 'uint16', rw: 'RO', unit: '', description: '0=停机,1=运行,2=故障' }
+      { address: 5, name: '运行状态', dataType: 'uint16', rw: 'RO', unit: '', description: '0=停机,1=运行,2=故障' },
+      { address: 6, name: '有功功率', dataType: 'float32', rw: 'RO', unit: 'kW', description: '设备当前有功功率' }
     ],
     initialValues: {
       0: { type: 'float32', value: 25.5 },
       2: { type: 'float32', value: 60.0 },
       4: { type: 'uint16', value: 45 },
-      5: { type: 'uint16', value: 1 }
+      5: { type: 'uint16', value: 1 },
+      6: { type: 'float32', value: 7.5 }
     },
     polling: { intervalMs: 1000, priority: 2 }
   },
@@ -33,12 +37,14 @@ const PRESET_DEVICES = [
     registers: [
       { address: 0, name: '频率设定', dataType: 'float32', rw: 'RW', unit: 'Hz', description: '目标运行频率' },
       { address: 2, name: '实际频率', dataType: 'float32', rw: 'RO', unit: 'Hz', description: '当前输出频率' },
-      { address: 4, name: '电流', dataType: 'float32', rw: 'RO', unit: 'A', description: '电机运行电流' }
+      { address: 4, name: '电流', dataType: 'float32', rw: 'RO', unit: 'A', description: '电机运行电流' },
+      { address: 6, name: '有功功率', dataType: 'float32', rw: 'RO', unit: 'kW', description: '电机当前有功功率' }
     ],
     initialValues: {
       0: { type: 'float32', value: 50.0 },
       2: { type: 'float32', value: 49.8 },
-      4: { type: 'float32', value: 12.5 }
+      4: { type: 'float32', value: 12.5 },
+      6: { type: 'float32', value: 15.2 }
     },
     polling: { intervalMs: 500, priority: 1 }
   },
@@ -311,6 +317,62 @@ async function setupPresetFirmware() {
   }
 }
 
+async function setupPresetEnergy(deviceIds) {
+  const shiftRow = await get('SELECT COUNT(*) as cnt FROM work_shifts');
+  const bindingRow = await get('SELECT COUNT(*) as cnt FROM energy_bindings');
+  const shiftCount = shiftRow ? shiftRow.cnt : 0;
+  const bindingCount = bindingRow ? bindingRow.cnt : 0;
+
+  if (!deviceIds) {
+    const devices = await deviceService.getAllDevices();
+    deviceIds = {};
+    for (const d of devices) {
+      deviceIds[d.name] = d.id;
+    }
+  }
+
+  const createdShifts = {};
+  if (shiftCount === 0) {
+    const threeShifts = [
+      { name: '早班', startHour: 8, startMinute: 0, endHour: 16, endMinute: 0 },
+      { name: '中班', startHour: 16, startMinute: 0, endHour: 0, endMinute: 0 },
+      { name: '夜班', startHour: 0, startMinute: 0, endHour: 8, endMinute: 0 }
+    ];
+    for (const s of threeShifts) {
+      const res = await energyService.createShift(s);
+      if (res.success) {
+        createdShifts[s.name] = res.shift.id;
+        console.log(`预置班次: ${s.name}`);
+      }
+    }
+  }
+
+  if (bindingCount === 0) {
+    if (deviceIds['温控器']) {
+      const r1 = await energyService.createBinding({
+        deviceId: deviceIds['温控器'],
+        powerRegAddress: 6,
+        ratedPower: 10.0,
+        loadThreshold: 0.1,
+        thresholdKwh: 80.0
+      });
+      if (r1.success) console.log('预置能耗绑定: 温控器-有功功率(reg6), 额定10kW, 阈值80kWh/班');
+    }
+    if (deviceIds['变频器']) {
+      const r2 = await energyService.createBinding({
+        deviceId: deviceIds['变频器'],
+        powerRegAddress: 6,
+        ratedPower: 18.5,
+        loadThreshold: 0.1,
+        thresholdKwh: 150.0
+      });
+      if (r2.success) console.log('预置能耗绑定: 变频器-有功功率(reg6), 额定18.5kW, 阈值150kWh/班');
+    }
+  }
+
+  return createdShifts;
+}
+
 async function setupPresetData() {
   await setupPresetFirmware();
   const deviceIds = await setupPresetDevices();
@@ -319,6 +381,7 @@ async function setupPresetData() {
   await setupPresetSequences(deviceIds);
   await setupPresetRecipes(deviceIds);
   await setupPresetTrends(deviceIds);
+  await setupPresetEnergy(deviceIds);
 }
 
 module.exports = {

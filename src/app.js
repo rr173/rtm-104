@@ -13,6 +13,7 @@ const sequenceService = require('./services/sequenceService');
 const trendService = require('./services/trendService');
 const firmwareService = require('./services/firmwareService');
 const otaService = require('./services/otaService');
+const energyService = require('./services/energyService');
 
 const devicesRouter = require('./routes/devices');
 const pollingRouter = require('./routes/polling');
@@ -27,6 +28,7 @@ const trendsRouter = require('./routes/trends');
 const replayRouter = require('./routes/replay');
 const firmwareRouter = require('./routes/firmware');
 const otaRouter = require('./routes/ota');
+const energyRouter = require('./routes/energy');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -56,7 +58,8 @@ app.get('/', (req, res) => {
       replay: '/api/replay',
       compare: '/api/compare',
       firmware: '/api/firmware',
-      ota: '/api/ota'
+      ota: '/api/ota',
+      energy: '/api/energy'
     }
   });
 });
@@ -74,6 +77,7 @@ app.use('/api/trends', trendsRouter);
 app.use('/api/replay', replayRouter);
 app.use('/api/firmware', firmwareRouter);
 app.use('/api/ota', otaRouter);
+app.use('/api/energy', energyRouter);
 
 app.use((err, req, res, next) => {
   console.error('Server error:', err);
@@ -107,6 +111,7 @@ async function startup() {
     sequenceService.startEngine();
     notificationService.startEngine();
     await trendService.startEngineForAll();
+    energyService.startEngine();
     console.log('Modbus Gateway Service 启动完成');
     console.log(`预置数据: 温控器(high报警阈值80°C), 液位计(low报警阈值1m)`);
     console.log(`预置联锁: 液位低停泵、温度超限关加热`);
@@ -134,6 +139,7 @@ process.on('SIGTERM', () => {
   sequenceService.stopEngine();
   notificationService.stopEngine();
   trendService.stopEngine();
+  energyService.stopEngine();
   server.close(() => process.exit(0));
 });
 
@@ -146,6 +152,7 @@ process.on('SIGINT', () => {
   sequenceService.stopEngine();
   notificationService.stopEngine();
   trendService.stopEngine();
+  energyService.stopEngine();
   server.close(() => process.exit(0));
 });
 
