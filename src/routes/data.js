@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const dataService = require('../services/dataService');
+const compareService = require('../services/compareService');
 
 router.get('/history/:deviceId/:regAddress', async (req, res) => {
   try {
@@ -25,6 +26,23 @@ router.get('/history/:deviceId/:regAddress', async (req, res) => {
 router.get('/snapshot', async (req, res) => {
   try {
     res.json(await dataService.getSnapshot());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/compare', async (req, res) => {
+  try {
+    const result = await compareService.compare(req.body);
+    if (!result.success) {
+      const statusCode = result.code || 400;
+      return res.status(statusCode).json({ error: result.error });
+    }
+    res.json({
+      periodA: result.periodA,
+      periodB: result.periodB,
+      diff: result.diff
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

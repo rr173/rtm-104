@@ -240,6 +240,21 @@ function init() {
 
     CREATE INDEX IF NOT EXISTS idx_trend_anom_dev_ts ON trend_anomalies(device_id, timestamp);
     CREATE INDEX IF NOT EXISTS idx_trend_anom_ts ON trend_anomalies(timestamp);
+
+    CREATE TABLE IF NOT EXISTS replay_reports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      device_ids TEXT NOT NULL,
+      start_time INTEGER NOT NULL,
+      end_time INTEGER NOT NULL,
+      speed_multiplier REAL NOT NULL,
+      started_at INTEGER NOT NULL,
+      finished_at INTEGER NOT NULL,
+      total_records INTEGER NOT NULL,
+      triggered_alarms TEXT NOT NULL,
+      triggered_interlocks TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_replay_reports_ts ON replay_reports(started_at);
   `);
 }
 

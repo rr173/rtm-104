@@ -20,6 +20,7 @@ const interlocksRouter = require('./routes/interlocks');
 const sequencesRouter = require('./routes/sequences');
 const recipesRouter = require('./routes/recipes');
 const trendsRouter = require('./routes/trends');
+const replayRouter = require('./routes/replay');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -44,7 +45,9 @@ app.get('/', (req, res) => {
       interlocks: '/api/interlocks',
       sequences: '/api/sequences',
       recipes: '/api/recipes',
-      trends: '/api/trends'
+      trends: '/api/trends',
+      replay: '/api/replay',
+      compare: '/api/compare'
     }
   });
 });
@@ -58,6 +61,7 @@ app.use('/api/interlocks', interlocksRouter);
 app.use('/api/sequences', sequencesRouter);
 app.use('/api/recipes', recipesRouter);
 app.use('/api/trends', trendsRouter);
+app.use('/api/replay', replayRouter);
 
 app.use((err, req, res, next) => {
   console.error('Server error:', err);
