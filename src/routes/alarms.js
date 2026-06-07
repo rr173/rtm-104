@@ -14,6 +14,18 @@ router.post('/rules', async (req, res) => {
   }
 });
 
+router.put('/rules/:id', async (req, res) => {
+  try {
+    const result = await alarmService.updateRule(req.params.id, req.body);
+    if (!result.success) {
+      return res.status(400).json({ error: result.error });
+    }
+    res.json(result.rule);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get('/rules', async (req, res) => {
   try {
     res.json(await alarmService.getAllRules());

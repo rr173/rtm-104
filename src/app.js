@@ -7,6 +7,7 @@ const pollingService = require('./services/pollingService');
 const computedTagService = require('./services/computedTagService');
 const presetService = require('./services/presetService');
 const alarmService = require('./services/alarmService');
+const notificationService = require('./services/notificationService');
 const interlockService = require('./services/interlockService');
 const sequenceService = require('./services/sequenceService');
 const trendService = require('./services/trendService');
@@ -14,6 +15,7 @@ const trendService = require('./services/trendService');
 const devicesRouter = require('./routes/devices');
 const pollingRouter = require('./routes/polling');
 const alarmsRouter = require('./routes/alarms');
+const notificationsRouter = require('./routes/notifications');
 const tagsRouter = require('./routes/tags');
 const dataRouter = require('./routes/data');
 const interlocksRouter = require('./routes/interlocks');
@@ -40,6 +42,7 @@ app.get('/', (req, res) => {
       devices: '/api/devices',
       polling: '/api/polling',
       alarms: '/api/alarms',
+      notifications: '/api/notifications',
       tags: '/api/tags',
       data: '/api/history and /api/snapshot',
       interlocks: '/api/interlocks',
@@ -55,6 +58,7 @@ app.get('/', (req, res) => {
 app.use('/api/devices', devicesRouter);
 app.use('/api/polling', pollingRouter);
 app.use('/api/alarms', alarmsRouter);
+app.use('/api/notifications', notificationsRouter);
 app.use('/api/tags', tagsRouter);
 app.use('/api', dataRouter);
 app.use('/api/interlocks', interlocksRouter);
@@ -89,6 +93,7 @@ async function startup() {
     await alarmService.evaluateAllAlarms();
     interlockService.startEngine();
     sequenceService.startEngine();
+    notificationService.startEngine();
     await trendService.startEngineForAll();
     console.log('Modbus Gateway Service 启动完成');
     console.log(`预置数据: 温控器(high报警阈值80°C), 液位计(low报警阈值1m)`);
@@ -113,6 +118,7 @@ process.on('SIGTERM', () => {
   require('./store/computedTagStore').clearAllTimers();
   interlockService.stopEngine();
   sequenceService.stopEngine();
+  notificationService.stopEngine();
   trendService.stopEngine();
   server.close(() => process.exit(0));
 });
@@ -123,6 +129,7 @@ process.on('SIGINT', () => {
   require('./store/computedTagStore').clearAllTimers();
   interlockService.stopEngine();
   sequenceService.stopEngine();
+  notificationService.stopEngine();
   trendService.stopEngine();
   server.close(() => process.exit(0));
 });

@@ -2,6 +2,9 @@ const { v4: uuidv4 } = require('uuid');
 const { run, get, all } = require('../db/database');
 const deviceStore = require('../store/deviceStore');
 const alarmStateStore = require('../store/alarmStateStore');
+const notificationService = require('./notificationService');
+
+const VALID_NOTIFY_CHANNELS = ['log', 'webhook', 'both'];
 
 function validateRule(body) {
   if (!body.deviceId) return '缺少deviceId';
@@ -17,6 +20,18 @@ function validateRule(body) {
     return '延迟确认时间必须是非负数字';
   }
   if (!deviceStore.hasDevice(body.deviceId)) return '设备不存在';
+
+  if (body.notifyChannel !== undefined) {
+    if (!VALID_NOTIFY_CHANNELS.includes(body.notifyChannel)) {
+      return 'notifyChannel必须是log/webhook/both之一';
+    }
+    if (body.notifyChannel !== 'log' && !body.webhookUrl) {
+      return 'notifyChannel包含webhook时必须提供webhookUrl';
+    }
+  }
+  if (body.escalateAfterSeconds !== undefined && (typeof body.escalateAfterSeconds !== 'number' || body.escalateAfterSeconds < 0)) {
+    return 'escalateAfterSeconds必须是非负数字';
+  }
   return null;
 }
 
@@ -54,17 +69,63 @@ async function createRule(body) {
   const id = uuidv4();
   const hysteresis = body.hysteresis || 0;
   const delaySeconds = body.delaySeconds || 0;
+  const notifyChannel = body.notifyChannel || 'log';
+  const escalateAfterSeconds = body.escalateAfterSeconds !== undefined ? body.escalateAfterSeconds : 0;
+  const webhookUrl = body.webhookUrl || null;
 
-  await run(`INSERT INTO alarm_rules (id, device_id, reg_address, alarm_type, threshold, hysteresis, delay_seconds)
-    VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [id, body.deviceId, body.regAddress, body.alarmType, body.threshold, hysteresis, delaySeconds]);
+  await run(
+    `INSERT INTO alarm_rules (id, device_id, reg_address, alarm_type, threshold, hysteresis, delay_seconds, notify_channel, escalate_after_seconds, webhook_url)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, body.deviceId, body.regAddress, body.alarmType, body.threshold, hysteresis, delaySeconds, notifyChannel, escalateAfterSeconds, webhookUrl]
+  );
 
   return { success: true, rule: await getRuleById(id) };
 }
 
-async function getRuleById(id) {
-  const row = await get('SELECT * FROM alarm_rules WHERE id = ?', [id]);
-  if (!row) return null;
+async function updateRule(id, body) {
+  const existing = await get('SELECT * FROM alarm_rules WHERE id = ?', [id]);
+  if (!existing) return { success: false, error: '报警规则不存在' };
+
+  const mergedBody = {
+    deviceId: existing.device_id,
+    regAddress: existing.reg_address,
+    alarmType: existing.alarm_type,
+    threshold: existing.threshold,
+    hysteresis: existing.hysteresis,
+    delaySeconds: existing.delay_seconds,
+    notifyChannel: existing.notify_channel,
+    escalateAfterSeconds: existing.escalate_after_seconds,
+    webhookUrl: existing.webhook_url,
+    ...body
+  };
+
+  const err = validateRule(mergedBody);
+  if (err) return { success: false, error: err };
+
+  const updates = {};
+  if (body.deviceId !== undefined) updates.device_id = body.deviceId;
+  if (body.regAddress !== undefined) updates.reg_address = body.regAddress;
+  if (body.alarmType !== undefined) updates.alarm_type = body.alarmType;
+  if (body.threshold !== undefined) updates.threshold = body.threshold;
+  if (body.hysteresis !== undefined) updates.hysteresis = body.hysteresis;
+  if (body.delaySeconds !== undefined) updates.delay_seconds = body.delaySeconds;
+  if (body.notifyChannel !== undefined) updates.notify_channel = body.notifyChannel;
+  if (body.escalateAfterSeconds !== undefined) updates.escalate_after_seconds = body.escalateAfterSeconds;
+  if (body.webhookUrl !== undefined) updates.webhook_url = body.webhookUrl;
+
+  if (Object.keys(updates).length === 0) {
+    return { success: true, rule: await getRuleById(id) };
+  }
+
+  const sets = Object.keys(updates).map(k => `${k} = ?`).join(', ');
+  const params = Object.values(updates);
+  params.push(id);
+
+  await run(`UPDATE alarm_rules SET ${sets} WHERE id = ?`, params);
+  return { success: true, rule: await getRuleById(id) };
+}
+
+function formatRule(row) {
   return {
     id: row.id,
     deviceId: row.device_id,
@@ -72,34 +133,27 @@ async function getRuleById(id) {
     alarmType: row.alarm_type,
     threshold: row.threshold,
     hysteresis: row.hysteresis,
-    delaySeconds: row.delay_seconds
+    delaySeconds: row.delay_seconds,
+    notifyChannel: row.notify_channel || 'log',
+    escalateAfterSeconds: row.escalate_after_seconds !== undefined ? row.escalate_after_seconds : 0,
+    webhookUrl: row.webhook_url || null
   };
+}
+
+async function getRuleById(id) {
+  const row = await get('SELECT * FROM alarm_rules WHERE id = ?', [id]);
+  if (!row) return null;
+  return formatRule(row);
 }
 
 async function getAllRules() {
   const rows = await all('SELECT * FROM alarm_rules');
-  return rows.map(row => ({
-    id: row.id,
-    deviceId: row.device_id,
-    regAddress: row.reg_address,
-    alarmType: row.alarm_type,
-    threshold: row.threshold,
-    hysteresis: row.hysteresis,
-    delaySeconds: row.delay_seconds
-  }));
+  return rows.map(formatRule);
 }
 
 async function getRulesByDevice(deviceId) {
   const rows = await all('SELECT * FROM alarm_rules WHERE device_id = ?', [deviceId]);
-  return rows.map(row => ({
-    id: row.id,
-    deviceId: row.device_id,
-    regAddress: row.reg_address,
-    alarmType: row.alarm_type,
-    threshold: row.threshold,
-    hysteresis: row.hysteresis,
-    delaySeconds: row.delay_seconds
-  }));
+  return rows.map(formatRule);
 }
 
 async function evaluateRule(rule, now) {
@@ -144,9 +198,30 @@ async function evaluateRule(rule, now) {
 }
 
 async function triggerAlarm(rule, value, now) {
-  await run(`INSERT INTO alarms (rule_id, device_id, reg_address, alarm_type, threshold, current_value, triggered_at, recovered_at, acknowledged, acknowledged_at, active)
+  const insertResult = await run(
+    `INSERT INTO alarms (rule_id, device_id, reg_address, alarm_type, threshold, current_value, triggered_at, recovered_at, acknowledged, acknowledged_at, active)
     VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0, NULL, 1)`,
-    [rule.id, rule.deviceId, rule.regAddress, rule.alarmType, rule.threshold, value, now]);
+    [rule.id, rule.deviceId, rule.regAddress, rule.alarmType, rule.threshold, value, now]
+  );
+
+  const alarmId = insertResult.lastID;
+
+  const deviceRow = await get('SELECT name FROM devices WHERE id = ?', [rule.deviceId]);
+  const regRow = await get('SELECT name FROM registers WHERE device_id = ? AND address = ?', [rule.deviceId, rule.regAddress]);
+  const deviceName = deviceRow ? deviceRow.name : rule.deviceId;
+  const regName = regRow ? regRow.name : `reg${rule.regAddress}`;
+
+  await notificationService.createNotification(
+    {
+      id: alarmId,
+      current_value: value,
+      threshold: rule.threshold,
+      alarm_type: rule.alarmType
+    },
+    deviceName,
+    regName,
+    rule.notifyChannel || 'log'
+  );
 }
 
 async function evaluateAlarmsForDevice(deviceId) {
@@ -243,11 +318,15 @@ async function acknowledgeAlarm(id) {
 
   await run('UPDATE alarms SET acknowledged = 1, acknowledged_at = ? WHERE id = ?',
     [Date.now(), id]);
+
+  await notificationService.resolveNotificationsForAlarm(id);
+
   return { success: true };
 }
 
 module.exports = {
   createRule,
+  updateRule,
   getRuleById,
   getAllRules,
   getActiveAlarms,

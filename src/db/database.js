@@ -55,8 +55,23 @@ function serialize(fn) {
   });
 }
 
+async function migrate() {
+  const columns = await all("PRAGMA table_info(alarm_rules)");
+  const colNames = columns.map(c => c.name);
+  if (!colNames.includes('notify_channel')) {
+    await run("ALTER TABLE alarm_rules ADD COLUMN notify_channel TEXT NOT NULL DEFAULT 'log'");
+  }
+  if (!colNames.includes('escalate_after_seconds')) {
+    await run("ALTER TABLE alarm_rules ADD COLUMN escalate_after_seconds INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!colNames.includes('webhook_url')) {
+    await run("ALTER TABLE alarm_rules ADD COLUMN webhook_url TEXT");
+  }
+}
+
 function init() {
-  return exec(`
+  return serialize(async () => {
+    await exec(`
     CREATE TABLE IF NOT EXISTS devices (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -102,7 +117,10 @@ function init() {
       alarm_type TEXT NOT NULL,
       threshold REAL NOT NULL,
       hysteresis REAL NOT NULL DEFAULT 0,
-      delay_seconds INTEGER NOT NULL DEFAULT 0
+      delay_seconds INTEGER NOT NULL DEFAULT 0,
+      notify_channel TEXT NOT NULL DEFAULT 'log',
+      escalate_after_seconds INTEGER NOT NULL DEFAULT 0,
+      webhook_url TEXT
     );
 
     CREATE TABLE IF NOT EXISTS alarms (
@@ -122,6 +140,28 @@ function init() {
 
     CREATE INDEX IF NOT EXISTS idx_alarms_active ON alarms(active);
     CREATE INDEX IF NOT EXISTS idx_alarms_device ON alarms(device_id, triggered_at);
+
+    CREATE TABLE IF NOT EXISTS notifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      alarm_id INTEGER NOT NULL,
+      device_name TEXT NOT NULL,
+      reg_name TEXT NOT NULL,
+      current_value REAL NOT NULL,
+      threshold REAL NOT NULL,
+      alarm_type TEXT NOT NULL,
+      notify_channel TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      is_escalation INTEGER NOT NULL DEFAULT 0,
+      parent_notification_id INTEGER,
+      created_at INTEGER NOT NULL,
+      sent_at INTEGER,
+      resolved_at INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_notifications_status ON notifications(status);
+    CREATE INDEX IF NOT EXISTS idx_notifications_alarm ON notifications(alarm_id);
+    CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at);
 
     CREATE TABLE IF NOT EXISTS computed_tags (
       id TEXT PRIMARY KEY,
@@ -256,6 +296,8 @@ function init() {
 
     CREATE INDEX IF NOT EXISTS idx_replay_reports_ts ON replay_reports(started_at);
   `);
+    await migrate();
+  });
 }
 
 module.exports = {
