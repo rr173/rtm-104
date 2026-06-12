@@ -220,7 +220,9 @@ function checkTransitions() {
 
   if (exec.status === 'blocked') {
     checkBlockedStepResume();
-    return;
+    if (exec.status === 'blocked') {
+      return;
+    }
   }
 
   if (exec.status !== 'running' && exec.status !== 'overridden') return;
@@ -232,7 +234,8 @@ function checkTransitions() {
 
   const history = exec.stepHistory[exec.currentStep];
   const enteredAt = history ? history.enteredAt : exec.startedAt;
-  const elapsedSec = (Date.now() - enteredAt) / 1000;
+  const blockedMs = history ? (history.blockedMs || 0) : 0;
+  const elapsedSec = (Date.now() - enteredAt - blockedMs) / 1000;
 
   if (step.timeoutSeconds !== undefined && elapsedSec >= step.timeoutSeconds) {
     sequenceStore.leaveStep(exec.currentStep);

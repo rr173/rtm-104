@@ -322,14 +322,6 @@ async function getStats(query = {}) {
     sql += ' AND device_id = ?';
     params.push(deviceId);
   }
-  if (startDate) {
-    sql += ' AND (actual_start_at >= ? OR (status = \'in_progress\' AND actual_start_at IS NOT NULL))';
-    params.push(startDate);
-  }
-  if (endDate) {
-    sql += ' AND (actual_start_at <= ? OR status = \'in_progress\')';
-    params.push(endDate);
-  }
 
   const rows = await all(sql, params);
 
@@ -342,27 +334,40 @@ async function getStats(query = {}) {
   for (const order of rows) {
     if (order.status === 'scheduled') continue;
 
-    orderCount++;
-    const startAt = order.actual_start_at || order.created_at;
-    let endAt = order.actual_end_at;
-
+    const fullStartAt = order.actual_start_at || order.created_at;
+    let fullEndAt = order.actual_end_at;
     if (order.status === 'in_progress') {
-      endAt = now;
+      fullEndAt = now;
     }
 
-    if (startAt && endAt) {
-      const duration = endAt - startAt;
-      totalDowntimeMs += duration;
+    if (!fullStartAt || !fullEndAt || fullEndAt <= fullStartAt) continue;
 
-      if (order.maintenance_type === 'planned') {
-        plannedDowntimeMs += duration;
-      } else {
-        emergencyDowntimeMs += duration;
-      }
+    let effStart = fullStartAt;
+    let effEnd = fullEndAt;
 
-      if (order.status === 'completed') {
-        completedDurations.push(duration);
-      }
+    if (startDate) {
+      effStart = Math.max(effStart, startDate);
+    }
+    if (endDate) {
+      effEnd = Math.min(effEnd, endDate);
+    }
+
+    const clippedDuration = effEnd - effStart;
+    if (clippedDuration <= 0) continue;
+
+    orderCount++;
+
+    const fullDuration = fullEndAt - fullStartAt;
+    totalDowntimeMs += clippedDuration;
+
+    if (order.maintenance_type === 'planned') {
+      plannedDowntimeMs += clippedDuration;
+    } else {
+      emergencyDowntimeMs += clippedDuration;
+    }
+
+    if (order.status === 'completed') {
+      completedDurations.push(fullDuration);
     }
   }
 

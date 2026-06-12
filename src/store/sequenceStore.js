@@ -66,6 +66,24 @@ class SequenceStore {
 
   unblock() {
     if (this.currentExecution && this.currentExecution.status === 'blocked') {
+      const blockedDuration = this.currentExecution.blockedSince
+        ? (Date.now() - this.currentExecution.blockedSince)
+        : 0;
+
+      if (!this.currentExecution.totalBlockedMs) {
+        this.currentExecution.totalBlockedMs = 0;
+      }
+      this.currentExecution.totalBlockedMs += blockedDuration;
+
+      if (this.currentExecution.currentStep !== null) {
+        const step = this.currentExecution.currentStep;
+        if (this.currentExecution.stepHistory[step]) {
+          const hist = this.currentExecution.stepHistory[step];
+          if (!hist.blockedMs) hist.blockedMs = 0;
+          hist.blockedMs += blockedDuration;
+        }
+      }
+
       this.currentExecution.blocked = false;
       this.currentExecution.blockedSince = null;
       this.currentExecution.blockedReason = null;
