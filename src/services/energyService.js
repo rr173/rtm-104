@@ -3,6 +3,7 @@ const { run, get, all } = require('../db/database');
 const deviceStore = require('../store/deviceStore');
 const energyStore = require('../store/energyStore');
 const notificationService = require('./notificationService');
+const maintenanceService = require('./maintenanceService');
 
 function minutesOfDay(hour, minute) {
   return hour * 60 + minute;
@@ -401,6 +402,10 @@ async function sampleEnergyForBinding(binding, now) {
   const thresholdKwh = binding.thresholdKwh !== undefined ? binding.thresholdKwh : binding.threshold_kwh;
 
   if (activeShifts.length === 0) return;
+
+  if (maintenanceService.isDeviceLocked(deviceId)) {
+    return;
+  }
 
   const regRow = await get(
     `SELECT * FROM registers WHERE device_id = ? AND address = ?`,

@@ -1,4 +1,4 @@
-const { get } = require('../db/database');
+const { get, all } = require('../db/database');
 const deviceService = require('./deviceService');
 const alarmService = require('./alarmService');
 const pollingService = require('./pollingService');
@@ -9,7 +9,7 @@ const trendService = require('./trendService');
 const firmwareService = require('./firmwareService');
 const deviceStore = require('../store/deviceStore');
 const energyService = require('./energyService');
-const { all } = require('../db/database');
+const maintenanceService = require('./maintenanceService');
 
 const PRESET_DEVICES = [
   {
@@ -373,6 +373,53 @@ async function setupPresetEnergy(deviceIds) {
   return createdShifts;
 }
 
+async function setupPresetMaintenance(deviceIds) {
+  const row = await get('SELECT COUNT(*) as cnt FROM maintenance_orders');
+  const count = row ? row.cnt : 0;
+  if (count > 0) return;
+
+  if (!deviceIds) {
+    const devices = await deviceService.getAllDevices();
+    deviceIds = {};
+    for (const d of devices) {
+      deviceIds[d.name] = d.id;
+    }
+  }
+
+  const now = Date.now();
+
+  if (deviceIds['温控器']) {
+    const plannedResult = await maintenanceService.createOrder({
+      deviceId: deviceIds['温控器'],
+      maintenanceType: 'planned',
+      plannedStartAt: now + 60 * 1000,
+      plannedEndAt: now + 180 * 1000,
+      description: '温控器季度例行检修计划',
+      responsiblePerson: '张工'
+    });
+    if (plannedResult.success) {
+      console.log('预置维保工单: 温控器计划维保(启动后60s开始,180s结束)');
+    } else {
+      console.error('预置温控器维保工单失败:', plannedResult.error);
+    }
+  }
+
+  if (deviceIds['变频器']) {
+    const emergencyResult = await maintenanceService.createOrder({
+      deviceId: deviceIds['变频器'],
+      maintenanceType: 'emergency',
+      plannedEndAt: now + 120 * 1000,
+      description: '变频器异常振动紧急检修',
+      responsiblePerson: '李工'
+    });
+    if (emergencyResult.success) {
+      console.log('预置维保工单: 变频器紧急维保(立即生效,持续120s)');
+    } else {
+      console.error('预置变频器维保工单失败:', emergencyResult.error);
+    }
+  }
+}
+
 async function setupPresetData() {
   await setupPresetFirmware();
   const deviceIds = await setupPresetDevices();
@@ -382,6 +429,7 @@ async function setupPresetData() {
   await setupPresetRecipes(deviceIds);
   await setupPresetTrends(deviceIds);
   await setupPresetEnergy(deviceIds);
+  await setupPresetMaintenance(deviceIds);
 }
 
 module.exports = {

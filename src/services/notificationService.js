@@ -2,6 +2,7 @@ const http = require('http');
 const https = require('https');
 const { URL } = require('url');
 const { run, get, all } = require('../db/database');
+const maintenanceService = require('./maintenanceService');
 
 const SCAN_INTERVAL_MS = 5000;
 const WEBHOOK_TIMEOUT_MS = 3000;
@@ -219,6 +220,10 @@ async function scanForEscalations() {
   );
 
   for (const alarm of unacknowledgedAlarms) {
+    if (maintenanceService.isDeviceLocked(alarm.device_id)) {
+      continue;
+    }
+
     const elapsedMs = now - alarm.triggered_at;
     const elapsedSeconds = elapsedMs / 1000;
 

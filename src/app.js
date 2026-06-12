@@ -14,6 +14,7 @@ const trendService = require('./services/trendService');
 const firmwareService = require('./services/firmwareService');
 const otaService = require('./services/otaService');
 const energyService = require('./services/energyService');
+const maintenanceService = require('./services/maintenanceService');
 
 const devicesRouter = require('./routes/devices');
 const pollingRouter = require('./routes/polling');
@@ -29,6 +30,7 @@ const replayRouter = require('./routes/replay');
 const firmwareRouter = require('./routes/firmware');
 const otaRouter = require('./routes/ota');
 const energyRouter = require('./routes/energy');
+const maintenanceRouter = require('./routes/maintenance');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -59,7 +61,8 @@ app.get('/', (req, res) => {
       compare: '/api/compare',
       firmware: '/api/firmware',
       ota: '/api/ota',
-      energy: '/api/energy'
+      energy: '/api/energy',
+      maintenance: '/api/maintenance'
     }
   });
 });
@@ -78,6 +81,7 @@ app.use('/api/replay', replayRouter);
 app.use('/api/firmware', firmwareRouter);
 app.use('/api/ota', otaRouter);
 app.use('/api/energy', energyRouter);
+app.use('/api/maintenance', maintenanceRouter);
 
 app.use((err, req, res, next) => {
   console.error('Server error:', err);
@@ -103,6 +107,8 @@ async function startup() {
     console.log(`从数据库加载 ${fwCount} 个固件版本`);
     const otaCount = await otaService.loadOtaHistoryFromDB();
     console.log(`从数据库加载 ${otaCount} 条OTA升级历史`);
+    const maintCount = await maintenanceService.loadOrdersFromDB();
+    console.log(`从数据库恢复 ${maintCount} 个进行中的维保工单锁定状态`);
     await presetService.setupPresetData();
     await pollingService.startPollingForAll();
     await computedTagService.startAllComputedTags();
@@ -112,6 +118,7 @@ async function startup() {
     notificationService.startEngine();
     await trendService.startEngineForAll();
     energyService.startEngine();
+    maintenanceService.startEngine();
     console.log('Modbus Gateway Service 启动完成');
     console.log(`预置数据: 温控器(high报警阈值80°C), 液位计(low报警阈值1m)`);
     console.log(`预置联锁: 液位低停泵、温度超限关加热`);
@@ -119,6 +126,7 @@ async function startup() {
     console.log(`预置配方: 产品A配方(温控60°C/变频30Hz)、产品B配方(温控80°C/变频50Hz)`);
     console.log(`预置趋势分析: 温控器当前温度(窗口50/3-sigma/2s)、变频器实际频率(窗口50/3-sigma/2s)`);
     console.log(`预置固件版本: 1.0.0/1.1.0/2.0.0, 设备初始版本1.0.0`);
+    console.log(`预置维保工单: 温控器计划维保(60s后开始,180s后结束)、变频器紧急维保(立即开始,120s后结束)`);
   } catch (e) {
     console.error('启动失败:', e);
     process.exit(1);
@@ -135,11 +143,13 @@ process.on('SIGTERM', () => {
   pollingStore.clearAllTimers();
   require('./store/computedTagStore').clearAllTimers();
   require('./store/otaStore').clearAllTimers();
+  require('./store/maintenanceStore').clearAllTimers();
   interlockService.stopEngine();
   sequenceService.stopEngine();
   notificationService.stopEngine();
   trendService.stopEngine();
   energyService.stopEngine();
+  maintenanceService.stopEngine();
   server.close(() => process.exit(0));
 });
 
@@ -148,11 +158,13 @@ process.on('SIGINT', () => {
   pollingStore.clearAllTimers();
   require('./store/computedTagStore').clearAllTimers();
   require('./store/otaStore').clearAllTimers();
+  require('./store/maintenanceStore').clearAllTimers();
   interlockService.stopEngine();
   sequenceService.stopEngine();
   notificationService.stopEngine();
   trendService.stopEngine();
   energyService.stopEngine();
+  maintenanceService.stopEngine();
   server.close(() => process.exit(0));
 });
 

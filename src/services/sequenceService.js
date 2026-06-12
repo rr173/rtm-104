@@ -3,6 +3,7 @@ const { run, get, all } = require('../db/database');
 const deviceStore = require('../store/deviceStore');
 const sequenceStore = require('../store/sequenceStore');
 const interlockStore = require('../store/interlockStore');
+const maintenanceService = require('./maintenanceService');
 const { evaluateExpression, parseExpression } = require('../utils/expression');
 
 const SCAN_INTERVAL_MS = 200;
@@ -141,6 +142,25 @@ function enterAndExecuteStep(stepNumber) {
 
   sequenceStore.enterStep(stepNumber);
 
+  let hasLockedDevice = false;
+  let lockedDeviceId = null;
+  for (const action of step.actions) {
+    if (maintenanceService.isDeviceLocked(action.deviceId)) {
+      hasLockedDevice = true;
+      lockedDeviceId = action.deviceId;
+      break;
+    }
+  }
+
+  if (hasLockedDevice) {
+    sequenceStore.markStepBlocked(stepNumber, `设备${lockedDeviceId}维保中`);
+    maintenanceService.logBlockedSequence(
+      lockedDeviceId, exec.sequenceId, stepNumber
+    ).catch(e => console.error('记录顺序阻塞事件失败:', e));
+    console.log(`[顺序控制] 步骤${stepNumber}因设备维保被阻塞: sequenceId=${exec.sequenceId}, deviceId=${lockedDeviceId}`);
+    return;
+  }
+
   for (const action of step.actions) {
     deviceStore.setRegisterValue(action.deviceId, action.address, 'float32', action.value);
   }
@@ -164,9 +184,45 @@ function checkStepOverrides() {
   }
 }
 
+function checkBlockedStepResume() {
+  const exec = sequenceStore.getExecution();
+  if (!exec || exec.status !== 'blocked' || exec.currentStep === null) return;
+
+  const step = exec.steps[exec.currentStep];
+  if (!step) return;
+
+  let hasLockedDevice = false;
+  for (const action of step.actions) {
+    if (maintenanceService.isDeviceLocked(action.deviceId)) {
+      hasLockedDevice = true;
+      break;
+    }
+  }
+
+  if (!hasLockedDevice) {
+    sequenceStore.unblock();
+    const stepHist = exec.stepHistory[exec.currentStep];
+    if (stepHist && stepHist.blockedAt) {
+      stepHist.unblockedAt = Date.now();
+      stepHist.blocked = false;
+    }
+    console.log(`[顺序控制] 步骤${exec.currentStep}设备维保结束，恢复执行: sequenceId=${exec.sequenceId}`);
+
+    for (const action of step.actions) {
+      deviceStore.setRegisterValue(action.deviceId, action.address, 'float32', action.value);
+    }
+  }
+}
+
 function checkTransitions() {
   const exec = sequenceStore.getExecution();
   if (!exec) return;
+
+  if (exec.status === 'blocked') {
+    checkBlockedStepResume();
+    return;
+  }
+
   if (exec.status !== 'running' && exec.status !== 'overridden') return;
 
   checkStepOverrides();
@@ -234,7 +290,8 @@ function getSequenceStatus(id) {
       currentStep: null,
       elapsedMs: 0,
       stepHistory: {},
-      overridden: false
+      overridden: false,
+      blocked: false
     };
   }
   return {
@@ -245,7 +302,10 @@ function getSequenceStatus(id) {
     startedAt: exec.startedAt,
     elapsedMs: Date.now() - exec.startedAt,
     stepHistory: exec.stepHistory,
-    overridden: exec.overridden
+    overridden: exec.overridden,
+    blocked: exec.blocked || false,
+    blockedSince: exec.blockedSince || null,
+    blockedReason: exec.blockedReason || null
   };
 }
 

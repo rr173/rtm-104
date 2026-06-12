@@ -3,6 +3,7 @@ const deviceStore = require('../store/deviceStore');
 const pollingStore = require('../store/pollingStore');
 const deviceService = require('./deviceService');
 const otaService = require('./otaService');
+const maintenanceService = require('./maintenanceService');
 const { getRegisterSpan } = require('../utils/modbus');
 
 function validateConfig(body) {
@@ -38,6 +39,8 @@ async function doPoll(deviceId) {
   const registers = await deviceService.getDeviceRegisters(deviceId);
   const addrs = collectRegisterAddresses(deviceId, registers);
 
+  const isUnderMaintenance = maintenanceService.isDeviceLocked(deviceId);
+
   if (deviceStore.consumeFault(deviceId)) {
     pollingStore.recordFailure(deviceId);
     const st = pollingStore.getStatus(deviceId);
@@ -53,13 +56,6 @@ async function doPoll(deviceId) {
       await run(`INSERT INTO register_history (device_id, reg_address, value, timestamp, stale)
         VALUES (?, ?, ?, ?, 1)`, [deviceId, r.address, value, now]);
     }
-
-    try {
-      const { evaluateAlarmsForDevice } = require('./alarmService');
-      await evaluateAlarmsForDevice(deviceId);
-    } catch (e) {
-      console.error('Alarm eval error:', e.message);
-    }
     return;
   }
 
@@ -69,17 +65,21 @@ async function doPoll(deviceId) {
   for (const r of registers) {
     const { value } = deviceStore.getRegisterValue(deviceId, r.address, r.data_type);
     await run(`INSERT INTO register_history (device_id, reg_address, value, timestamp, stale)
-      VALUES (?, ?, ?, ?, 0)`, [deviceId, r.address, value, now]);
+      VALUES (?, ?, ?, ?, ?)`, [deviceId, r.address, value, now, isUnderMaintenance ? 2 : 0]);
   }
 
   pollingStore.recordSuccess(deviceId);
-  deviceStore.setStatus(deviceId, 'online');
+  if (!isUnderMaintenance) {
+    deviceStore.setStatus(deviceId, 'online');
+  }
 
-  try {
-    const { evaluateAlarmsForDevice } = require('./alarmService');
-    await evaluateAlarmsForDevice(deviceId);
-  } catch (e) {
-    console.error('Alarm eval error:', e.message);
+  if (!isUnderMaintenance) {
+    try {
+      const { evaluateAlarmsForDevice } = require('./alarmService');
+      await evaluateAlarmsForDevice(deviceId);
+    } catch (e) {
+      console.error('Alarm eval error:', e.message);
+    }
   }
 }
 

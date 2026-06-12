@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const deviceService = require('../services/deviceService');
+const maintenanceService = require('../services/maintenanceService');
 
 router.post('/', async (req, res) => {
   try {
@@ -53,6 +54,9 @@ router.post('/:id/registers/write', async (req, res) => {
     if (address === undefined || value === undefined) {
       return res.status(400).json({ error: '缺少address或value参数' });
     }
+    if (maintenanceService.isDeviceLocked(req.params.id)) {
+      return res.status(423).json({ error: '设备维保中' });
+    }
     const result = await deviceService.writeRegister(req.params.id, address, value);
     if (!result.success) {
       return res.status(400).json({ error: result.error });
@@ -68,6 +72,9 @@ router.post('/:id/registers/batch-write', async (req, res) => {
     const { writes } = req.body;
     if (!Array.isArray(writes)) {
       return res.status(400).json({ error: 'writes必须是数组' });
+    }
+    if (maintenanceService.isDeviceLocked(req.params.id)) {
+      return res.status(423).json({ error: '设备维保中' });
     }
     const result = await deviceService.writeMultipleRegisters(req.params.id, writes);
     if (!result.success) {

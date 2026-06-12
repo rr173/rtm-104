@@ -2,6 +2,7 @@ const { v4: uuidv4 } = require('uuid');
 const { run, get, all } = require('../db/database');
 const deviceStore = require('../store/deviceStore');
 const interlockStore = require('../store/interlockStore');
+const maintenanceService = require('./maintenanceService');
 const { evaluateExpression, parseExpression, getReferences } = require('../utils/expression');
 
 const SCAN_INTERVAL_MS = 500;
@@ -214,9 +215,15 @@ async function logEvent(interlockId, interlockName, triggerValue, actions) {
   );
 }
 
-function executeActions(interlockId, priority, actions) {
+function executeActions(interlockId, interlockName, priority, actions) {
   const now = Date.now();
   for (const action of actions) {
+    if (maintenanceService.isDeviceLocked(action.deviceId)) {
+      maintenanceService.logSuppressedInterlock(
+        action.deviceId, interlockId, interlockName
+      ).catch(e => console.error('记录维保抑制事件失败:', e));
+      continue;
+    }
     if (interlockStore.recordWrite(interlockId, priority, action.deviceId, action.address, action.value, now)) {
       deviceStore.setRegisterValue(action.deviceId, action.address, 'float32', action.value);
     }
@@ -244,10 +251,10 @@ async function scanOnce() {
         triggerValue,
         triggeredAt: Date.now()
       });
-      executeActions(row.id, row.priority, actions);
+      executeActions(row.id, row.name, row.priority, actions);
       await logEvent(row.id, row.name, triggerValue, actions);
     } else if (triggered && currentState === 'triggered') {
-      executeActions(row.id, row.priority, actions);
+      executeActions(row.id, row.name, row.priority, actions);
     } else if (!triggered && currentState === 'triggered') {
       if (row.auto_reset) {
         interlockStore.setState(row.id, 'normal');

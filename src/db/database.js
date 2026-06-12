@@ -388,6 +388,36 @@ function init() {
 
     CREATE INDEX IF NOT EXISTS idx_energy_alarm_shift ON energy_alarms(device_id, shift_id, shift_date);
     CREATE INDEX IF NOT EXISTS idx_energy_alarm_ts ON energy_alarms(triggered_at);
+
+    CREATE TABLE IF NOT EXISTS maintenance_orders (
+      id TEXT PRIMARY KEY,
+      device_id TEXT NOT NULL,
+      maintenance_type TEXT NOT NULL,
+      status TEXT NOT NULL,
+      planned_start_at INTEGER,
+      planned_end_at INTEGER,
+      actual_start_at INTEGER,
+      actual_end_at INTEGER,
+      description TEXT,
+      responsible_person TEXT,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_maint_device ON maintenance_orders(device_id);
+    CREATE INDEX IF NOT EXISTS idx_maint_status ON maintenance_orders(status);
+    CREATE INDEX IF NOT EXISTS idx_maint_planned_start ON maintenance_orders(planned_start_at);
+
+    CREATE TABLE IF NOT EXISTS maintenance_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      event_data TEXT,
+      timestamp INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_maint_events_ts ON maintenance_events(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_maint_events_order ON maintenance_events(order_id);
   `);
     await migrate();
   });

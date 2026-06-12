@@ -3,6 +3,7 @@ const { run, get, all } = require('../db/database');
 const deviceStore = require('../store/deviceStore');
 const alarmStateStore = require('../store/alarmStateStore');
 const notificationService = require('./notificationService');
+const maintenanceService = require('./maintenanceService');
 
 const VALID_NOTIFY_CHANNELS = ['log', 'webhook', 'both'];
 
@@ -157,6 +158,10 @@ async function getRulesByDevice(deviceId) {
 }
 
 async function evaluateRule(rule, now) {
+  if (maintenanceService.isDeviceLocked(rule.deviceId)) {
+    return;
+  }
+
   const reg = await get('SELECT * FROM registers WHERE device_id = ? AND address = ?',
     [rule.deviceId, rule.regAddress]);
   if (!reg) return;
