@@ -2,6 +2,7 @@ const { v4: uuidv4 } = require('uuid');
 const { run, get, all } = require('../db/database');
 const deviceStore = require('../store/deviceStore');
 const maintenanceStore = require('../store/maintenanceStore');
+const redundancyService = require('./redundancyService');
 
 const VALID_TYPES = ['planned', 'emergency'];
 const VALID_STATUSES = ['scheduled', 'in_progress', 'completed', 'cancelled'];
@@ -112,6 +113,15 @@ async function createOrder(body) {
     maintenanceStore.lockDevice(body.deviceId, id);
     await logEvent(id, body.deviceId, 'lock_device', { reason: 'emergency_created' });
     console.log(`[维保] 紧急维保工单已创建并锁定设备: orderId=${id}, deviceId=${body.deviceId}`);
+    try {
+      await redundancyService.checkAndSwitchForDevice(
+        body.deviceId,
+        redundancyService.SWITCH_REASONS.MAINTENANCE_START,
+        `紧急维保工单创建: ${id}`
+      );
+    } catch (e) {
+      console.error('[冗余] 维保锁定触发切换出错:', e.message);
+    }
   } else {
     await logEvent(id, body.deviceId, 'created_scheduled', {
       plannedStartAt, plannedEndAt
@@ -180,6 +190,15 @@ async function startOrder(id) {
   maintenanceStore.lockDevice(order.device_id, id);
   await logEvent(id, order.device_id, 'lock_device', { reason: 'order_started', startedAt: now });
   console.log(`[维保] 工单开始，设备已锁定: orderId=${id}, deviceId=${order.device_id}`);
+  try {
+    await redundancyService.checkAndSwitchForDevice(
+      order.device_id,
+      redundancyService.SWITCH_REASONS.MAINTENANCE_START,
+      `维保工单开始: ${id}`
+    );
+  } catch (e) {
+    console.error('[冗余] 维保开始触发切换出错:', e.message);
+  }
 
   return { success: true, order: await getOrderById(id) };
 }
@@ -209,6 +228,11 @@ async function completeOrder(id) {
 
   await logEvent(id, order.device_id, 'unlock_device', { reason: 'order_completed', endedAt: now });
   console.log(`[维保] 工单完成，设备已解锁: orderId=${id}, deviceId=${order.device_id}`);
+  try {
+    await redundancyService.checkDeviceRecovery(order.device_id);
+  } catch (e) {
+    console.error('[冗余] 维保完成设备恢复检查出错:', e.message);
+  }
 
   return { success: true, order: await getOrderById(id) };
 }
@@ -238,6 +262,11 @@ async function cancelOrder(id) {
     if (lockInfo && lockInfo.orderId === id) {
       maintenanceStore.unlockDevice(order.device_id);
       await logEvent(id, order.device_id, 'unlock_device', { reason: 'order_cancelled', endedAt: now });
+      try {
+        await redundancyService.checkDeviceRecovery(order.device_id);
+      } catch (e) {
+        console.error('[冗余] 维保取消设备恢复检查出错:', e.message);
+      }
     }
   }
 

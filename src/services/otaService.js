@@ -4,6 +4,7 @@ const otaStore = require('../store/otaStore');
 const deviceStore = require('../store/deviceStore');
 const pollingStore = require('../store/pollingStore');
 const firmwareService = require('./firmwareService');
+const redundancyService = require('./redundancyService');
 
 const STAGES = [
   { name: 'download', label: '下载', duration: 2000, progressStart: 0, progressEnd: 25 },
@@ -61,6 +62,16 @@ async function startUpgrade(deviceId, firmwareId) {
 
   deviceStore.setStatus(deviceId, 'upgrading');
   pollingStore.clearTimer(deviceId);
+
+  try {
+    await redundancyService.checkAndSwitchForDevice(
+      deviceId,
+      redundancyService.SWITCH_REASONS.UPGRADE_START,
+      `OTA升级开始: ${firmware.version}`
+    );
+  } catch (e) {
+    console.error('[冗余] OTA升级触发切换出错:', e.message);
+  }
 
   runUpgradeStages(deviceId, upgradeId, firmwareId, firmware.version, 0);
 
@@ -144,6 +155,12 @@ async function completeUpgrade(deviceId, upgradeId, firmwareVersion) {
   otaStore.completeUpgrade(deviceId);
 
   try {
+    await redundancyService.checkDeviceRecovery(deviceId);
+  } catch (e) {
+    console.error('[冗余] OTA升级完成设备恢复检查出错:', e.message);
+  }
+
+  try {
     const pollingService = require('./pollingService');
     const config = await pollingService.getConfig(deviceId);
     if (config && config.enabled) {
@@ -164,6 +181,12 @@ async function failUpgrade(deviceId, upgradeId, stage, errorMessage) {
 
   deviceStore.setStatus(deviceId, 'online');
   otaStore.failUpgrade(deviceId, errorMessage);
+
+  try {
+    await redundancyService.checkDeviceRecovery(deviceId);
+  } catch (e) {
+    console.error('[冗余] OTA升级失败设备恢复检查出错:', e.message);
+  }
 
   try {
     const pollingService = require('./pollingService');

@@ -4,6 +4,7 @@ const pollingStore = require('../store/pollingStore');
 const deviceService = require('./deviceService');
 const otaService = require('./otaService');
 const maintenanceService = require('./maintenanceService');
+const redundancyService = require('./redundancyService');
 const { getRegisterSpan } = require('../utils/modbus');
 
 function validateConfig(body) {
@@ -46,6 +47,15 @@ async function doPoll(deviceId) {
     const st = pollingStore.getStatus(deviceId);
     if (st.consecutiveFailures >= 3) {
       deviceStore.setStatus(deviceId, 'offline');
+      try {
+        await redundancyService.checkAndSwitchForDevice(
+          deviceId,
+          redundancyService.SWITCH_REASONS.POLLING_FAILURE,
+          `连续${st.consecutiveFailures}次轮询失败`
+        );
+      } catch (e) {
+        console.error('[冗余] 轮询失败触发切换出错:', e.message);
+      }
     }
 
     deviceStore.markStale(deviceId, addrs);
@@ -71,6 +81,12 @@ async function doPoll(deviceId) {
   pollingStore.recordSuccess(deviceId);
   if (!isUnderMaintenance) {
     deviceStore.setStatus(deviceId, 'online');
+  }
+
+  try {
+    await redundancyService.checkDeviceRecovery(deviceId);
+  } catch (e) {
+    console.error('[冗余] 设备恢复检查出错:', e.message);
   }
 
   if (!isUnderMaintenance) {

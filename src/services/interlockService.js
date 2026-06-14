@@ -3,6 +3,7 @@ const { run, get, all } = require('../db/database');
 const deviceStore = require('../store/deviceStore');
 const interlockStore = require('../store/interlockStore');
 const maintenanceService = require('./maintenanceService');
+const redundancyService = require('./redundancyService');
 const { evaluateExpression, parseExpression, getReferences } = require('../utils/expression');
 
 const SCAN_INTERVAL_MS = 500;
@@ -15,11 +16,13 @@ function toBool(v) {
 function resolveRegisterReference(refName) {
   const parts = refName.split('.');
   if (parts.length < 2) return 0;
-  const deviceId = parts[0];
+  const origDeviceId = parts[0];
   const regStr = parts[1];
   const addrMatch = regStr.match(/^reg(\d+)$/);
   if (!addrMatch) return 0;
   const address = parseInt(addrMatch[1]);
+  const resolved = redundancyService.resolveDeviceForOperation(origDeviceId);
+  const deviceId = resolved.deviceId;
   const { value } = deviceStore.getRegisterValue(deviceId, address, 'float32');
   return value;
 }
@@ -215,17 +218,27 @@ async function logEvent(interlockId, interlockName, triggerValue, actions) {
   );
 }
 
-function executeActions(interlockId, interlockName, priority, actions) {
+async function executeActions(interlockId, interlockName, priority, actions) {
   const now = Date.now();
   for (const action of actions) {
-    if (maintenanceService.isDeviceLocked(action.deviceId)) {
+    const resolved = redundancyService.resolveDeviceForOperation(action.deviceId);
+    const actualDeviceId = resolved.deviceId;
+    if (resolved.inDegraded) {
+      continue;
+    }
+    if (maintenanceService.isDeviceLocked(actualDeviceId)) {
       maintenanceService.logSuppressedInterlock(
-        action.deviceId, interlockId, interlockName
+        actualDeviceId, interlockId, interlockName
       ).catch(e => console.error('记录维保抑制事件失败:', e));
       continue;
     }
-    if (interlockStore.recordWrite(interlockId, priority, action.deviceId, action.address, action.value, now)) {
-      deviceStore.setRegisterValue(action.deviceId, action.address, 'float32', action.value);
+    if (interlockStore.recordWrite(interlockId, priority, actualDeviceId, action.address, action.value, now)) {
+      deviceStore.setRegisterValue(actualDeviceId, action.address, 'float32', action.value);
+      try {
+        await redundancyService.notifyRegisterWritten(actualDeviceId, action.address, 'float32', action.value);
+      } catch (e) {
+        console.error('[联锁] 热同步备用机失败:', e.message);
+      }
     }
   }
 }
@@ -251,16 +264,45 @@ async function scanOnce() {
         triggerValue,
         triggeredAt: Date.now()
       });
-      executeActions(row.id, row.name, row.priority, actions);
+      await executeActions(row.id, row.name, row.priority, actions);
       await logEvent(row.id, row.name, triggerValue, actions);
     } else if (triggered && currentState === 'triggered') {
-      executeActions(row.id, row.name, row.priority, actions);
+      await executeActions(row.id, row.name, row.priority, actions);
     } else if (!triggered && currentState === 'triggered') {
       if (row.auto_reset) {
         interlockStore.setState(row.id, 'normal');
         interlockStore.setTriggeredInfo(row.id, null);
         interlockStore.clearWritesForInterlock(row.id);
       }
+    }
+  }
+}
+
+async function onRedundancySwitch(groupId, fromDeviceId, toDeviceId) {
+  if (!fromDeviceId || !toDeviceId) return;
+
+  const activeWrites = interlockStore.getAllActiveWrites();
+  const affectedWrites = activeWrites.filter(w => w.deviceId === fromDeviceId);
+
+  for (const w of affectedWrites) {
+    interlockStore.clearWritesForInterlock(w.interlockId);
+
+    if (maintenanceService.isDeviceLocked(toDeviceId)) {
+      maintenanceService.logSuppressedInterlock(
+        toDeviceId, w.interlockId, 'redundancy_switch'
+      ).catch(e => console.error('[联锁] 记录冗余切换抑制失败:', e.message));
+      continue;
+    }
+
+    const now = Date.now();
+    if (interlockStore.recordWrite(w.interlockId, w.priority, toDeviceId, w.address, w.value, now)) {
+      deviceStore.setRegisterValue(toDeviceId, w.address, 'float32', w.value);
+      try {
+        await redundancyService.notifyRegisterWritten(toDeviceId, w.address, 'float32', w.value);
+      } catch (e) {
+        console.error('[联锁] 冗余切换后热同步失败:', e.message);
+      }
+      console.log(`[联锁] 主备切换后联锁跟随: interlock=${w.interlockId}, ${fromDeviceId} -> ${toDeviceId}, addr=${w.address}, val=${w.value}`);
     }
   }
 }
@@ -293,5 +335,6 @@ module.exports = {
   startEngine,
   stopEngine,
   scanOnce,
-  resolveRegisterReference
+  resolveRegisterReference,
+  onRedundancySwitch
 };

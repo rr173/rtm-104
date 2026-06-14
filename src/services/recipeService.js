@@ -1,6 +1,7 @@
 const { v4: uuidv4 } = require('uuid');
 const { run, get, all } = require('../db/database');
 const deviceStore = require('../store/deviceStore');
+const redundancyService = require('./redundancyService');
 
 const TYPE_RANGES = {
   int16: { min: -32768, max: 32767 },
@@ -37,22 +38,28 @@ function validateRecipeInput(body) {
 }
 
 async function validateItemAgainstRegister(item) {
+  const resolved = redundancyService.resolveDeviceForOperation(item.deviceId);
+  if (resolved.inDegraded) {
+    return { valid: false, error: `主备组[${resolved.groupName}]当前处于降级状态，没有可接管设备` };
+  }
+  const actualDeviceId = resolved.deviceId;
+
   const reg = await get(
     'SELECT * FROM registers WHERE device_id = ? AND address = ?',
-    [item.deviceId, item.address]
+    [actualDeviceId, item.address]
   );
   if (!reg) {
-    return { valid: false, error: `寄存器不存在: 设备${item.deviceId} 地址${item.address}` };
+    return { valid: false, error: `寄存器不存在: 设备${actualDeviceId} 地址${item.address}` };
   }
   if (reg.rw !== 'RW') {
-    return { valid: false, error: `寄存器为只读: 设备${item.deviceId} 地址${item.address} (${reg.name})` };
+    return { valid: false, error: `寄存器为只读: 设备${actualDeviceId} 地址${item.address} (${reg.name})` };
   }
-  if (!deviceStore.hasDevice(item.deviceId)) {
-    return { valid: false, error: `设备未初始化: ${item.deviceId}` };
+  if (!deviceStore.hasDevice(actualDeviceId)) {
+    return { valid: false, error: `设备未初始化: ${actualDeviceId}` };
   }
-  const status = deviceStore.getStatus(item.deviceId);
+  const status = deviceStore.getStatus(actualDeviceId);
   if (status && status !== 'online') {
-    return { valid: false, error: `设备离线: ${item.deviceId} (状态: ${status})` };
+    return { valid: false, error: `设备离线: ${actualDeviceId} (状态: ${status})` };
   }
   const range = TYPE_RANGES[reg.data_type];
   if (range) {
@@ -63,7 +70,7 @@ async function validateItemAgainstRegister(item) {
       };
     }
   }
-  return { valid: true, reg };
+  return { valid: true, reg, actualDeviceId, resolved };
 }
 
 async function createRecipe(body) {
@@ -181,12 +188,15 @@ async function applyRecipe(id) {
 
   const validatedItems = [];
   const preValidationErrors = [];
+  const deviceIdMapping = new Map();
   for (const item of recipe.items) {
     const vr = await validateItemAgainstRegister(item);
     if (!vr.valid) {
       preValidationErrors.push({ item, error: vr.error });
     } else {
-      validatedItems.push({ ...item, dataType: vr.reg.data_type });
+      const actualDeviceId = vr.actualDeviceId || item.deviceId;
+      deviceIdMapping.set(`${item.deviceId}:${item.address}`, actualDeviceId);
+      validatedItems.push({ ...item, deviceId: actualDeviceId, originalDeviceId: item.deviceId, dataType: vr.reg.data_type });
     }
   }
 
@@ -235,6 +245,12 @@ async function applyRecipe(id) {
       }
       written.push(snap);
       writeResults.push({ ...snap, finalValue: snap.value, writeStatus: 'written' });
+
+      try {
+        await redundancyService.notifyRegisterWritten(snap.deviceId, snap.address, snap.dataType, snap.value);
+      } catch (syncErr) {
+        console.error('[配方] 热同步备用机失败:', syncErr.message);
+      }
     } catch (e) {
       failedItem = { deviceId: snap.deviceId, address: snap.address, value: snap.value };
       firstError = e.message;

@@ -418,6 +418,72 @@ function init() {
 
     CREATE INDEX IF NOT EXISTS idx_maint_events_ts ON maintenance_events(timestamp);
     CREATE INDEX IF NOT EXISTS idx_maint_events_order ON maintenance_events(order_id);
+
+    CREATE TABLE IF NOT EXISTS redundancy_groups (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      logical_device_id TEXT NOT NULL,
+      primary_device_id TEXT NOT NULL,
+      backup_device_id TEXT NOT NULL,
+      current_primary_id TEXT,
+      status TEXT NOT NULL DEFAULT 'normal',
+      failover_count INTEGER NOT NULL DEFAULT 0,
+      auto_failback_enabled INTEGER NOT NULL DEFAULT 1,
+      failback_delay_seconds INTEGER NOT NULL DEFAULT 300,
+      recovered_at INTEGER,
+      sync_registers TEXT,
+      description TEXT,
+      created_at INTEGER NOT NULL,
+      last_switch_at INTEGER,
+      last_switch_reason TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_rd_group_logical ON redundancy_groups(logical_device_id);
+
+    CREATE TABLE IF NOT EXISTS redundancy_device_bindings (
+      device_id TEXT PRIMARY KEY,
+      group_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_rd_binding_group ON redundancy_device_bindings(group_id);
+
+    CREATE TABLE IF NOT EXISTS redundancy_switch_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id TEXT NOT NULL,
+      group_name TEXT NOT NULL,
+      from_device_id TEXT,
+      from_device_name TEXT,
+      to_device_id TEXT NOT NULL,
+      to_device_name TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      reason_detail TEXT,
+      triggered_by TEXT NOT NULL DEFAULT 'system',
+      operator_remark TEXT,
+      status TEXT NOT NULL DEFAULT 'success',
+      error_message TEXT,
+      started_at INTEGER NOT NULL,
+      completed_at INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_rd_switch_group ON redundancy_switch_history(group_id, started_at);
+    CREATE INDEX IF NOT EXISTS idx_rd_switch_ts ON redundancy_switch_history(started_at);
+
+    CREATE TABLE IF NOT EXISTS redundancy_sync_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id TEXT NOT NULL,
+      source_device_id TEXT NOT NULL,
+      target_device_id TEXT NOT NULL,
+      reg_address INTEGER NOT NULL,
+      old_value REAL,
+      new_value REAL NOT NULL,
+      status TEXT NOT NULL DEFAULT 'success',
+      error_message TEXT,
+      timestamp INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_rd_sync_group ON redundancy_sync_log(group_id, timestamp);
   `);
     await migrate();
   });

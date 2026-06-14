@@ -4,7 +4,8 @@ const deviceStore = require('../store/deviceStore');
 const sequenceStore = require('../store/sequenceStore');
 const interlockStore = require('../store/interlockStore');
 const maintenanceService = require('./maintenanceService');
-const { evaluateExpression, parseExpression } = require('../utils/expression');
+const redundancyService = require('./redundancyService');
+const { evaluateExpression, parseExpression, getReferences } = require('../utils/expression');
 
 const SCAN_INTERVAL_MS = 200;
 
@@ -16,11 +17,13 @@ function toBool(v) {
 function resolveRegisterReference(refName) {
   const parts = refName.split('.');
   if (parts.length < 2) return 0;
-  const deviceId = parts[0];
+  const origDeviceId = parts[0];
   const regStr = parts[1];
   const addrMatch = regStr.match(/^reg(\d+)$/);
   if (!addrMatch) return 0;
   const address = parseInt(addrMatch[1]);
+  const resolved = redundancyService.resolveDeviceForOperation(origDeviceId);
+  const deviceId = resolved.deviceId;
   const { value } = deviceStore.getRegisterValue(deviceId, address, 'float32');
   return value;
 }
@@ -128,12 +131,12 @@ async function startSequence(id) {
   sequenceStore.startExecution(row.id, row.name, steps);
 
   const firstStepNum = sequenceStore.currentExecution.stepNumbers[0];
-  enterAndExecuteStep(firstStepNum);
+  await enterAndExecuteStep(firstStepNum);
 
   return { success: true, status: getSequenceStatus(id) };
 }
 
-function enterAndExecuteStep(stepNumber) {
+async function enterAndExecuteStep(stepNumber) {
   const exec = sequenceStore.getExecution();
   if (!exec) return;
 
@@ -144,12 +147,23 @@ function enterAndExecuteStep(stepNumber) {
 
   let hasLockedDevice = false;
   let lockedDeviceId = null;
+  const resolvedActions = [];
   for (const action of step.actions) {
-    if (maintenanceService.isDeviceLocked(action.deviceId)) {
+    const resolved = redundancyService.resolveDeviceForOperation(action.deviceId);
+    const actualDeviceId = resolved.deviceId;
+    if (resolved.inDegraded) {
       hasLockedDevice = true;
       lockedDeviceId = action.deviceId;
+      sequenceStore.markStepBlocked(stepNumber, `主备组[${resolved.groupName}]降级，无可用设备`);
+      console.log(`[顺序控制] 步骤${stepNumber}因主备组降级被阻塞: sequenceId=${exec.sequenceId}`);
+      return;
+    }
+    if (maintenanceService.isDeviceLocked(actualDeviceId)) {
+      hasLockedDevice = true;
+      lockedDeviceId = actualDeviceId;
       break;
     }
+    resolvedActions.push({ ...action, deviceId: actualDeviceId, originalDeviceId: action.deviceId });
   }
 
   if (hasLockedDevice) {
@@ -161,8 +175,13 @@ function enterAndExecuteStep(stepNumber) {
     return;
   }
 
-  for (const action of step.actions) {
+  for (const action of resolvedActions) {
     deviceStore.setRegisterValue(action.deviceId, action.address, 'float32', action.value);
+    try {
+      await redundancyService.notifyRegisterWritten(action.deviceId, action.address, 'float32', action.value);
+    } catch (e) {
+      console.error('[顺序控制] 热同步备用机失败:', e.message);
+    }
   }
 }
 
@@ -184,7 +203,7 @@ function checkStepOverrides() {
   }
 }
 
-function checkBlockedStepResume() {
+async function checkBlockedStepResume() {
   const exec = sequenceStore.getExecution();
   if (!exec || exec.status !== 'blocked' || exec.currentStep === null) return;
 
@@ -193,7 +212,13 @@ function checkBlockedStepResume() {
 
   let hasLockedDevice = false;
   for (const action of step.actions) {
-    if (maintenanceService.isDeviceLocked(action.deviceId)) {
+    const resolved = redundancyService.resolveDeviceForOperation(action.deviceId);
+    const actualDeviceId = resolved.deviceId;
+    if (resolved.inDegraded) {
+      hasLockedDevice = true;
+      break;
+    }
+    if (maintenanceService.isDeviceLocked(actualDeviceId)) {
       hasLockedDevice = true;
       break;
     }
@@ -209,17 +234,24 @@ function checkBlockedStepResume() {
     console.log(`[顺序控制] 步骤${exec.currentStep}设备维保结束，恢复执行: sequenceId=${exec.sequenceId}`);
 
     for (const action of step.actions) {
-      deviceStore.setRegisterValue(action.deviceId, action.address, 'float32', action.value);
+      const resolved = redundancyService.resolveDeviceForOperation(action.deviceId);
+      const actualDeviceId = resolved.deviceId;
+      deviceStore.setRegisterValue(actualDeviceId, action.address, 'float32', action.value);
+      try {
+        await redundancyService.notifyRegisterWritten(actualDeviceId, action.address, 'float32', action.value);
+      } catch (e) {
+        console.error('[顺序控制] 恢复时热同步备用机失败:', e.message);
+      }
     }
   }
 }
 
-function checkTransitions() {
+async function checkTransitions() {
   const exec = sequenceStore.getExecution();
   if (!exec) return;
 
   if (exec.status === 'blocked') {
-    checkBlockedStepResume();
+    await checkBlockedStepResume();
     if (exec.status === 'blocked') {
       return;
     }
@@ -248,7 +280,7 @@ function checkTransitions() {
       sequenceStore.setStatus('timeout');
       return;
     }
-    enterAndExecuteStep(targetStep);
+    await enterAndExecuteStep(targetStep);
     return;
   }
 
@@ -266,7 +298,7 @@ function checkTransitions() {
       sequenceStore.setStatus('completed');
     } else {
       const nextStep = exec.stepNumbers[currentIdx + 1];
-      enterAndExecuteStep(nextStep);
+      await enterAndExecuteStep(nextStep);
     }
   }
 }
@@ -317,11 +349,7 @@ let scanTimer = null;
 function startEngine() {
   if (scanTimer) return;
   scanTimer = setInterval(() => {
-    try {
-      checkTransitions();
-    } catch (e) {
-      console.error('顺序控制扫描错误:', e);
-    }
+    checkTransitions().catch(e => console.error('顺序控制扫描错误:', e));
   }, SCAN_INTERVAL_MS);
   console.log(`顺序控制引擎已启动 (扫描间隔 ${SCAN_INTERVAL_MS}ms)`);
 }

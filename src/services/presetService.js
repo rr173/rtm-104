@@ -10,6 +10,7 @@ const firmwareService = require('./firmwareService');
 const deviceStore = require('../store/deviceStore');
 const energyService = require('./energyService');
 const maintenanceService = require('./maintenanceService');
+const redundancyService = require('./redundancyService');
 
 const PRESET_DEVICES = [
   {
@@ -30,6 +31,63 @@ const PRESET_DEVICES = [
       6: { type: 'float32', value: 7.5 }
     },
     polling: { intervalMs: 1000, priority: 2 }
+  },
+  {
+    name: '温控器备',
+    slaveId: 11,
+    registers: [
+      { address: 0, name: '当前温度', dataType: 'float32', rw: 'RO', unit: '°C', description: '实时温度测量值' },
+      { address: 2, name: '设定温度', dataType: 'float32', rw: 'RW', unit: '°C', description: '目标温度设定值' },
+      { address: 4, name: '加热输出', dataType: 'uint16', rw: 'RO', unit: '%', description: '加热器输出占空比' },
+      { address: 5, name: '运行状态', dataType: 'uint16', rw: 'RO', unit: '', description: '0=停机,1=运行,2=故障' },
+      { address: 6, name: '有功功率', dataType: 'float32', rw: 'RO', unit: 'kW', description: '设备当前有功功率' }
+    ],
+    initialValues: {
+      0: { type: 'float32', value: 25.3 },
+      2: { type: 'float32', value: 60.0 },
+      4: { type: 'uint16', value: 42 },
+      5: { type: 'uint16', value: 1 },
+      6: { type: 'float32', value: 7.2 }
+    },
+    polling: { intervalMs: 1000, priority: 2 }
+  },
+  {
+    name: '泵1',
+    slaveId: 21,
+    registers: [
+      { address: 0, name: '频率设定', dataType: 'float32', rw: 'RW', unit: 'Hz', description: '目标运行频率' },
+      { address: 2, name: '实际频率', dataType: 'float32', rw: 'RO', unit: 'Hz', description: '当前输出频率' },
+      { address: 4, name: '电流', dataType: 'float32', rw: 'RO', unit: 'A', description: '电机运行电流' },
+      { address: 6, name: '有功功率', dataType: 'float32', rw: 'RO', unit: 'kW', description: '电机当前有功功率' },
+      { address: 8, name: '出口压力', dataType: 'float32', rw: 'RO', unit: 'MPa', description: '泵出口压力' }
+    ],
+    initialValues: {
+      0: { type: 'float32', value: 50.0 },
+      2: { type: 'float32', value: 49.8 },
+      4: { type: 'float32', value: 28.5 },
+      6: { type: 'float32', value: 18.2 },
+      8: { type: 'float32', value: 0.65 }
+    },
+    polling: { intervalMs: 500, priority: 1 }
+  },
+  {
+    name: '泵2',
+    slaveId: 22,
+    registers: [
+      { address: 0, name: '频率设定', dataType: 'float32', rw: 'RW', unit: 'Hz', description: '目标运行频率' },
+      { address: 2, name: '实际频率', dataType: 'float32', rw: 'RO', unit: 'Hz', description: '当前输出频率' },
+      { address: 4, name: '电流', dataType: 'float32', rw: 'RO', unit: 'A', description: '电机运行电流' },
+      { address: 6, name: '有功功率', dataType: 'float32', rw: 'RO', unit: 'kW', description: '电机当前有功功率' },
+      { address: 8, name: '出口压力', dataType: 'float32', rw: 'RO', unit: 'MPa', description: '泵出口压力' }
+    ],
+    initialValues: {
+      0: { type: 'float32', value: 50.0 },
+      2: { type: 'float32', value: 49.5 },
+      4: { type: 'float32', value: 27.8 },
+      6: { type: 'float32', value: 17.9 },
+      8: { type: 'float32', value: 0.63 }
+    },
+    polling: { intervalMs: 500, priority: 1 }
   },
   {
     name: '变频器',
@@ -389,33 +447,83 @@ async function setupPresetMaintenance(deviceIds) {
   const now = Date.now();
 
   if (deviceIds['温控器']) {
-    const plannedResult = await maintenanceService.createOrder({
+    const emergencyResult = await maintenanceService.createOrder({
       deviceId: deviceIds['温控器'],
-      maintenanceType: 'planned',
-      plannedStartAt: now + 60 * 1000,
-      plannedEndAt: now + 180 * 1000,
-      description: '温控器季度例行检修计划',
-      responsiblePerson: '张工'
+      maintenanceType: 'emergency',
+      plannedEndAt: now + 300 * 1000,
+      description: '温控器主机定期检修演示 - 启动时自动切到备用机',
+      responsiblePerson: '王工'
     });
-    if (plannedResult.success) {
-      console.log('预置维保工单: 温控器计划维保(启动后60s开始,180s结束)');
+    if (emergencyResult.success) {
+      console.log('预置维保工单: 温控器主机紧急维保(立即生效,持续300s)');
     } else {
-      console.error('预置温控器维保工单失败:', plannedResult.error);
+      console.error('预置温控器维保工单失败:', emergencyResult.error);
     }
   }
 
   if (deviceIds['变频器']) {
-    const emergencyResult = await maintenanceService.createOrder({
+    const plannedResult = await maintenanceService.createOrder({
       deviceId: deviceIds['变频器'],
-      maintenanceType: 'emergency',
-      plannedEndAt: now + 120 * 1000,
-      description: '变频器异常振动紧急检修',
+      maintenanceType: 'planned',
+      plannedStartAt: now + 60 * 1000,
+      plannedEndAt: now + 180 * 1000,
+      description: '变频器季度例行检修计划',
       responsiblePerson: '李工'
     });
-    if (emergencyResult.success) {
-      console.log('预置维保工单: 变频器紧急维保(立即生效,持续120s)');
+    if (plannedResult.success) {
+      console.log('预置维保工单: 变频器计划维保(启动后60s开始,180s结束)');
     } else {
-      console.error('预置变频器维保工单失败:', emergencyResult.error);
+      console.error('预置变频器维保工单失败:', plannedResult.error);
+    }
+  }
+}
+
+async function setupPresetRedundancy(deviceIds) {
+  const row = await get('SELECT COUNT(*) as cnt FROM redundancy_groups');
+  const count = row ? row.cnt : 0;
+  if (count > 0) return;
+
+  if (!deviceIds) {
+    const devices = await deviceService.getAllDevices();
+    deviceIds = {};
+    for (const d of devices) {
+      deviceIds[d.name] = d.id;
+    }
+  }
+
+  if (deviceIds['泵1'] && deviceIds['泵2']) {
+    const result = await redundancyService.createGroup({
+      name: '泵站冗余',
+      logicalDeviceId: 'logical-pump-station',
+      primaryDeviceId: deviceIds['泵1'],
+      backupDeviceId: deviceIds['泵2'],
+      description: '泵站主备冗余，泵1主泵2备',
+      autoFailbackEnabled: true,
+      failbackDelaySeconds: 60,
+      syncRegisters: [0]
+    });
+    if (result.success) {
+      console.log('预置主备冗余: 泵站冗余(泵1主/泵2备,热同步频率设定reg0)');
+    } else {
+      console.error('预置泵站冗余失败:', result.error);
+    }
+  }
+
+  if (deviceIds['温控器'] && deviceIds['温控器备']) {
+    const result = await redundancyService.createGroup({
+      name: '温控冗余',
+      logicalDeviceId: 'logical-temperature-control',
+      primaryDeviceId: deviceIds['温控器'],
+      backupDeviceId: deviceIds['温控器备'],
+      description: '温控系统主备冗余，温控器主、温控器备',
+      autoFailbackEnabled: true,
+      failbackDelaySeconds: 120,
+      syncRegisters: [2]
+    });
+    if (result.success) {
+      console.log('预置主备冗余: 温控冗余(温控器主/温控器备,热同步设定温度reg2)');
+    } else {
+      console.error('预置温控冗余失败:', result.error);
     }
   }
 }
@@ -430,6 +538,7 @@ async function setupPresetData() {
   await setupPresetTrends(deviceIds);
   await setupPresetEnergy(deviceIds);
   await setupPresetMaintenance(deviceIds);
+  await setupPresetRedundancy(deviceIds);
 }
 
 module.exports = {
