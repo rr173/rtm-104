@@ -2,6 +2,7 @@ const { v4: uuidv4 } = require('uuid');
 const { run, get, all } = require('../db/database');
 const deviceStore = require('../store/deviceStore');
 const pollingStore = require('../store/pollingStore');
+const redundancyService = require('./redundancyService');
 const { getRegisterSpan } = require('../utils/modbus');
 
 function validateRegister(reg) {
@@ -132,7 +133,10 @@ async function deleteDevice(id) {
 }
 
 async function writeRegister(deviceId, address, value) {
-  const reg = await get('SELECT * FROM registers WHERE device_id = ? AND address = ?', [deviceId, address]);
+  const resolved = redundancyService.resolveDeviceForOperation(deviceId);
+  const actualDeviceId = resolved.deviceId;
+
+  const reg = await get('SELECT * FROM registers WHERE device_id = ? AND address = ?', [actualDeviceId, address]);
   if (!reg) {
     return { success: false, error: '寄存器不存在' };
   }
@@ -140,16 +144,26 @@ async function writeRegister(deviceId, address, value) {
     return { success: false, error: '该寄存器为只读' };
   }
 
-  deviceStore.setRegisterValue(deviceId, address, reg.data_type, value);
-  return { success: true, value };
+  deviceStore.setRegisterValue(actualDeviceId, address, reg.data_type, value);
+
+  try {
+    await redundancyService.notifyRegisterWritten(actualDeviceId, address, reg.data_type, value);
+  } catch (syncErr) {
+    console.error('[deviceService] 写寄存器后热同步失败:', syncErr.message);
+  }
+
+  return { success: true, value, actualDeviceId, originalDeviceId: deviceId };
 }
 
 async function writeMultipleRegisters(deviceId, writes) {
+  const resolved = redundancyService.resolveDeviceForOperation(deviceId);
+  const actualDeviceId = resolved.deviceId;
+
   for (const w of writes) {
-    const result = await writeRegister(deviceId, w.address, w.value);
+    const result = await writeRegister(actualDeviceId, w.address, w.value);
     if (!result.success) return result;
   }
-  return { success: true };
+  return { success: true, actualDeviceId, originalDeviceId: deviceId };
 }
 
 async function simulateRegisterValue(deviceId, address, value) {

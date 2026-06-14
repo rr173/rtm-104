@@ -60,29 +60,16 @@ router.post('/:id/registers/write', async (req, res) => {
     if (resolved.inDegraded) {
       return res.status(503).json({ error: `主备组[${resolved.groupName}]当前处于降级状态，没有可接管设备` });
     }
-    const actualDeviceId = resolved.deviceId;
 
-    if (maintenanceService.isDeviceLocked(actualDeviceId)) {
+    if (maintenanceService.isDeviceLocked(resolved.deviceId)) {
       return res.status(423).json({ error: '设备维保中' });
     }
-    const result = await deviceService.writeRegister(actualDeviceId, address, value);
+
+    const result = await deviceService.writeRegister(req.params.id, address, value);
     if (!result.success) {
       return res.status(400).json({ error: result.error });
     }
-
-    try {
-      const reg = await require('../db/database').get(
-        'SELECT data_type FROM registers WHERE device_id = ? AND address = ?',
-        [actualDeviceId, address]
-      );
-      if (reg) {
-        await redundancyService.notifyRegisterWritten(actualDeviceId, address, reg.data_type, value);
-      }
-    } catch (syncErr) {
-      console.error('[设备] 写寄存器后热同步备用机失败:', syncErr.message);
-    }
-
-    res.json({ ...result, deviceId: actualDeviceId, originalDeviceId: req.params.id });
+    res.json(result);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -99,32 +86,16 @@ router.post('/:id/registers/batch-write', async (req, res) => {
     if (resolved.inDegraded) {
       return res.status(503).json({ error: `主备组[${resolved.groupName}]当前处于降级状态，没有可接管设备` });
     }
-    const actualDeviceId = resolved.deviceId;
 
-    if (maintenanceService.isDeviceLocked(actualDeviceId)) {
+    if (maintenanceService.isDeviceLocked(resolved.deviceId)) {
       return res.status(423).json({ error: '设备维保中' });
     }
-    const result = await deviceService.writeMultipleRegisters(actualDeviceId, writes);
+
+    const result = await deviceService.writeMultipleRegisters(req.params.id, writes);
     if (!result.success) {
       return res.status(400).json({ error: result.error });
     }
-
-    try {
-      const { get } = require('../db/database');
-      for (const w of writes) {
-        const reg = await get(
-          'SELECT data_type FROM registers WHERE device_id = ? AND address = ?',
-          [actualDeviceId, w.address]
-        );
-        if (reg) {
-          await redundancyService.notifyRegisterWritten(actualDeviceId, w.address, reg.data_type, w.value);
-        }
-      }
-    } catch (syncErr) {
-      console.error('[设备] 批量写寄存器后热同步备用机失败:', syncErr.message);
-    }
-
-    res.json({ ...result, deviceId: actualDeviceId, originalDeviceId: req.params.id });
+    res.json(result);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

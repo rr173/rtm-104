@@ -3,7 +3,6 @@ const { run, get, all } = require('../db/database');
 const redundancyStore = require('../store/redundancyStore');
 const deviceStore = require('../store/deviceStore');
 const pollingStore = require('../store/pollingStore');
-const deviceService = require('./deviceService');
 
 const SCAN_INTERVAL_MS = 2000;
 const CONSECUTIVE_FAILURE_THRESHOLD = 3;
@@ -144,7 +143,7 @@ async function syncAllHotRegisters(groupId) {
   const syncRegisters = group.syncRegisters || [];
   if (syncRegisters.length === 0) return;
 
-  const registers = await deviceService.getDeviceRegisters(currentPrimary);
+  const registers = await all('SELECT * FROM registers WHERE device_id = ? ORDER BY address', [currentPrimary]);
   const regMap = new Map();
   for (const r of registers) {
     regMap.set(r.address, r);
@@ -642,14 +641,25 @@ async function getSyncLogs(groupId, limit = 100) {
 }
 
 function resolveDeviceForOperation(deviceId) {
-  const group = redundancyStore.getGroupByDevice(deviceId);
+  let group = redundancyStore.getGroupByDevice(deviceId);
+  if (!group) {
+    group = redundancyStore.getGroupByLogicalDevice(deviceId);
+  }
   if (!group) return { deviceId, isRedundancy: false, inDegraded: false };
 
   const currentPrimary = group.currentPrimaryId || group.current_primary_id;
   const inDegraded = group.status === 'degraded';
 
-  if (inDegraded && !currentPrimary) {
-    return { deviceId, isRedundancy: true, inDegraded: true, groupId: group.id, groupName: group.name };
+  if (inDegraded) {
+    return {
+      deviceId: currentPrimary || deviceId,
+      isRedundancy: true,
+      inDegraded: true,
+      groupId: group.id,
+      groupName: group.name,
+      logicalDeviceId: group.logicalDeviceId || group.logical_device_id,
+      backupDeviceId: redundancyStore.getPeerDeviceId(currentPrimary)
+    };
   }
 
   return {
@@ -658,24 +668,29 @@ function resolveDeviceForOperation(deviceId) {
     inDegraded: false,
     groupId: group.id,
     groupName: group.name,
+    logicalDeviceId: group.logicalDeviceId || group.logical_device_id,
     backupDeviceId: redundancyStore.getPeerDeviceId(currentPrimary)
   };
 }
 
 async function notifyRegisterWritten(deviceId, address, dataType, value) {
-  const group = redundancyStore.getGroupByDevice(deviceId);
+  let group = redundancyStore.getGroupByDevice(deviceId);
+  const isLogicalDevice = !group;
+  if (!group) {
+    group = redundancyStore.getGroupByLogicalDevice(deviceId);
+  }
   if (!group) return;
 
   const currentPrimary = group.currentPrimaryId || group.current_primary_id;
-  if (deviceId !== currentPrimary) return;
+  if (!currentPrimary) return;
 
   const syncRegisters = group.syncRegisters || [];
   if (!syncRegisters.includes(address)) return;
 
-  const backupId = redundancyStore.getPeerDeviceId(deviceId);
+  const backupId = redundancyStore.getPeerDeviceId(currentPrimary);
   if (!backupId || !isDeviceAvailable(backupId)) return;
 
-  await syncRegisterToBackup(group.id, deviceId, backupId, address, dataType, value);
+  await syncRegisterToBackup(group.id, currentPrimary, backupId, address, dataType, value);
 }
 
 async function scanOnce() {
@@ -715,7 +730,7 @@ async function scanOnce() {
         if (peerId && isDeviceAvailable(peerId)) {
           const syncRegisters = group.syncRegisters || [];
           if (syncRegisters.length > 0) {
-            const registers = await deviceService.getDeviceRegisters(currentPrimary);
+            const registers = await all('SELECT * FROM registers WHERE device_id = ? ORDER BY address', [currentPrimary]);
             const regMap = new Map();
             for (const r of registers) {
               regMap.set(r.address, r);

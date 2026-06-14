@@ -8,9 +8,21 @@ class RedundancyStore {
   }
 
   addGroup(group) {
+    let parsedSyncRegisters = [];
+    if (group.syncRegisters !== undefined && group.syncRegisters !== null) {
+      if (typeof group.syncRegisters === 'string') {
+        try {
+          parsedSyncRegisters = JSON.parse(group.syncRegisters);
+        } catch (e) {
+          parsedSyncRegisters = [];
+        }
+      } else if (Array.isArray(group.syncRegisters)) {
+        parsedSyncRegisters = group.syncRegisters;
+      }
+    }
     this.groups.set(group.id, {
       ...group,
-      syncRegisters: group.syncRegisters ? JSON.parse(group.syncRegisters) : []
+      syncRegisters: parsedSyncRegisters
     });
     this.deviceToGroup.set(group.primaryDeviceId || group.primary_device_id, group.id);
     this.deviceToGroup.set(group.backupDeviceId || group.backup_device_id, group.id);
