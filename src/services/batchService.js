@@ -129,10 +129,11 @@ async function takeSnapshot(batchId, deviceIds) {
   const snapshotData = {};
 
   for (const devId of deviceIds) {
-    const regs = await all('SELECT * FROM registers WHERE device_id = ? ORDER BY address', [devId]);
+    const actualDeviceId = redundancyStore.getActiveDeviceId(devId);
+    const regs = await all('SELECT * FROM registers WHERE device_id = ? ORDER BY address', [actualDeviceId]);
     const data = {};
     for (const reg of regs) {
-      const { value } = deviceStore.getRegisterValue(devId, reg.address, reg.data_type);
+      const { value } = deviceStore.getRegisterValue(actualDeviceId, reg.address, reg.data_type);
       data[reg.address] = value;
     }
     snapshotData[devId] = data;
@@ -623,12 +624,15 @@ async function getCurrentDeviationStatus() {
   const result = [];
   for (const d of activeDeviations) {
     const regInfo = await get(
-      'SELECT name FROM registers WHERE device_id = ? AND address = ?',
+      'SELECT name, data_type FROM registers WHERE device_id = ? AND address = ?',
       [d.deviceId, d.address]
     );
-    const currentValue = deviceStore.getRegisterValue(d.deviceId, d.address, 'REAL').value;
+    const actualDeviceId = redundancyStore.getActiveDeviceId(d.deviceId);
+    const dataType = regInfo ? regInfo.data_type : 'REAL';
+    const currentValue = deviceStore.getRegisterValue(actualDeviceId, d.address, dataType).value;
     result.push({
       deviceId: d.deviceId,
+      actualDeviceId: actualDeviceId,
       address: d.address,
       registerName: regInfo ? regInfo.name : `reg${d.address}`,
       upperLimit: d.upperLimit,
