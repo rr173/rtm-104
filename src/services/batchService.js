@@ -2,7 +2,9 @@ const { v4: uuidv4 } = require('uuid');
 const { run, get, all } = require('../db/database');
 const deviceStore = require('../store/deviceStore');
 const batchStore = require('../store/batchStore');
+const redundancyStore = require('../store/redundancyStore');
 const alarmService = require('./alarmService');
+const maintenanceService = require('./maintenanceService');
 
 const SAMPLING_INTERVAL_MS = 5000;
 
@@ -284,11 +286,27 @@ async function changeBatchParam(batchId, data) {
     return { success: false, error: '该批次不是当前运行中的批次' };
   }
 
-  if (!batchStore.isRegisterLocked(data.deviceId, data.address)) {
+  const redundancyService = require('./redundancyService');
+  const resolved = redundancyService.resolveDeviceForOperation(data.deviceId);
+  if (resolved.inDegraded) {
+    return { success: false, error: `主备组[${resolved.groupName}]当前处于降级状态，没有可接管设备` };
+  }
+
+  const actualDeviceId = resolved.deviceId;
+
+  if (!isRegisterLocked(data.deviceId, data.address)) {
     return { success: false, error: '该寄存器未被批次锁定，请使用普通写入接口' };
   }
 
-  const reg = await get('SELECT * FROM registers WHERE device_id = ? AND address = ?', [data.deviceId, data.address]);
+  if (maintenanceService.isDeviceLocked(data.deviceId)) {
+    return { success: false, error: '设备维保中' };
+  }
+
+  if (maintenanceService.isDeviceLocked(actualDeviceId)) {
+    return { success: false, error: '设备维保中' };
+  }
+
+  const reg = await get('SELECT * FROM registers WHERE device_id = ? AND address = ?', [actualDeviceId, data.address]);
   if (!reg) {
     return { success: false, error: '寄存器不存在' };
   }
@@ -296,20 +314,27 @@ async function changeBatchParam(batchId, data) {
     return { success: false, error: '该寄存器为只读' };
   }
 
-  const { value: oldValue } = deviceStore.getRegisterValue(data.deviceId, data.address, reg.data_type);
+  const { value: oldValue } = deviceStore.getRegisterValue(actualDeviceId, data.address, reg.data_type);
 
   const now = Date.now();
   await run(
     'INSERT INTO batch_param_changes (batch_id, device_id, address, old_value, new_value, reason, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [batchId, data.deviceId, data.address, oldValue, data.newValue, data.reason.trim(), now]
+    [batchId, actualDeviceId, data.address, oldValue, data.newValue, data.reason.trim(), now]
   );
 
-  deviceStore.setRegisterValue(data.deviceId, data.address, reg.data_type, data.newValue);
+  deviceStore.setRegisterValue(actualDeviceId, data.address, reg.data_type, data.newValue);
+
+  try {
+    await redundancyService.notifyRegisterWritten(actualDeviceId, data.address, reg.data_type, data.newValue);
+  } catch (syncErr) {
+    console.error('[batchService] 批次参数变更后热同步备用机失败:', syncErr.message);
+  }
 
   return {
     success: true,
     change: {
-      deviceId: data.deviceId,
+      deviceId: actualDeviceId,
+      originalDeviceId: data.deviceId,
       address: data.address,
       oldValue,
       newValue: data.newValue,
@@ -400,7 +425,23 @@ async function getBatchParamChanges(batchId) {
 }
 
 function isRegisterLocked(deviceId, address) {
-  return batchStore.isRegisterLocked(deviceId, address);
+  if (batchStore.isRegisterLocked(deviceId, address)) {
+    return true;
+  }
+
+  const group = redundancyStore.getGroupByDevice(deviceId);
+  if (group) {
+    const memberIds = [group.primaryDeviceId, group.backupDeviceId];
+    if (group.currentPrimaryId) {
+      memberIds.push(group.currentPrimaryId);
+    }
+    for (const mid of memberIds) {
+      if (mid && mid !== deviceId && batchStore.isRegisterLocked(mid, address)) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 async function restoreRunningBatch() {
