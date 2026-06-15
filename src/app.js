@@ -18,6 +18,7 @@ const maintenanceService = require('./services/maintenanceService');
 const redundancyService = require('./services/redundancyService');
 const batchService = require('./services/batchService');
 const inspectionService = require('./services/inspectionService');
+const archiveService = require('./services/archiveService');
 
 const devicesRouter = require('./routes/devices');
 const pollingRouter = require('./routes/polling');
@@ -37,6 +38,7 @@ const maintenanceRouter = require('./routes/maintenance');
 const redundancyRouter = require('./routes/redundancy');
 const batchesRouter = require('./routes/batches');
 const inspectionRouter = require('./routes/inspection');
+const archiveRouter = require('./routes/archive');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -71,7 +73,8 @@ app.get('/', (req, res) => {
       maintenance: '/api/maintenance',
       redundancy: '/api/redundancy',
       batches: '/api/batches',
-      inspection: '/api/inspection'
+      inspection: '/api/inspection',
+      archive: '/api/archive'
     }
   });
 });
@@ -94,6 +97,7 @@ app.use('/api/maintenance', maintenanceRouter);
 app.use('/api/redundancy', redundancyRouter);
 app.use('/api/batches', batchesRouter);
 app.use('/api/inspection', inspectionRouter);
+app.use('/api/archive', archiveRouter);
 
 app.use((err, req, res, next) => {
   console.error('Server error:', err);
@@ -152,6 +156,7 @@ async function startup() {
     console.log(`从数据库恢复 ${batchCount} 个运行中批次`);
     await inspectionService.seedData();
     inspectionService.startEngine();
+    archiveService.startScheduledArchive();
     console.log('Modbus Gateway Service 启动完成');
     console.log(`预置数据: 温控器(high报警阈值80°C), 液位计(low报警阈值1m)`);
     console.log(`预置联锁: 液位低停泵、温度超限关加热`);
@@ -190,6 +195,7 @@ process.on('SIGTERM', () => {
   redundancyService.stopEngine();
   batchService.stopEngine();
   inspectionService.stopEngine();
+  archiveService.stopScheduledArchive();
   server.close(() => process.exit(0));
 });
 
@@ -208,6 +214,7 @@ process.on('SIGINT', () => {
   redundancyService.stopEngine();
   batchService.stopEngine();
   inspectionService.stopEngine();
+  archiveService.stopScheduledArchive();
   server.close(() => process.exit(0));
 });
 

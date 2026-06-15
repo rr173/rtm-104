@@ -12,6 +12,7 @@ const energyService = require('./energyService');
 const maintenanceService = require('./maintenanceService');
 const redundancyService = require('./redundancyService');
 const batchService = require('./batchService');
+const archiveService = require('./archiveService');
 
 const PRESET_DEVICES = [
   {
@@ -529,6 +530,38 @@ async function setupPresetRedundancy(deviceIds) {
   }
 }
 
+async function setupPresetArchivePolicies(deviceIds) {
+  const row = await get('SELECT COUNT(*) as cnt FROM archive_policies');
+  const count = row ? row.cnt : 0;
+  if (count > 0) return;
+
+  if (!deviceIds) {
+    const devices = await deviceService.getAllDevices();
+    deviceIds = {};
+    for (const d of devices) {
+      deviceIds[d.name] = d.id;
+    }
+  }
+
+  if (deviceIds['温控器']) {
+    await archiveService.setPolicy(deviceIds['温控器'], {
+      retentionDays: 3,
+      granularitySeconds: 60,
+      enabled: true
+    });
+    console.log('预置归档策略: 温控器(保留3天, 归档粒度1分钟)');
+  }
+
+  if (deviceIds['变频器']) {
+    await archiveService.setPolicy(deviceIds['变频器'], {
+      retentionDays: 5,
+      granularitySeconds: 300,
+      enabled: true
+    });
+    console.log('预置归档策略: 变频器(保留5天, 归档粒度5分钟)');
+  }
+}
+
 async function setupPresetBatches(deviceIds) {
   const row = await get('SELECT COUNT(*) as cnt FROM batches');
   const count = row ? row.cnt : 0;
@@ -619,6 +652,7 @@ async function setupPresetData() {
   await setupPresetMaintenance(deviceIds);
   await setupPresetRedundancy(deviceIds);
   await setupPresetBatches(deviceIds);
+  await setupPresetArchivePolicies(deviceIds);
 }
 
 module.exports = {

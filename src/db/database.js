@@ -630,6 +630,49 @@ function init() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_insp_result_task ON inspection_result_items(task_id);
+
+    CREATE TABLE IF NOT EXISTS archive_policies (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      device_id TEXT NOT NULL UNIQUE,
+      retention_days INTEGER NOT NULL DEFAULT 7,
+      granularity_seconds INTEGER NOT NULL DEFAULT 3600,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_archive_policy_device ON archive_policies(device_id);
+
+    CREATE TABLE IF NOT EXISTS register_history_archive (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      device_id TEXT NOT NULL,
+      reg_address INTEGER NOT NULL,
+      avg_value REAL NOT NULL,
+      max_value REAL NOT NULL,
+      min_value REAL NOT NULL,
+      sample_count INTEGER NOT NULL,
+      timestamp INTEGER NOT NULL,
+      window_seconds INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_rha_dev_reg_ts ON register_history_archive(device_id, reg_address, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_rha_ts ON register_history_archive(timestamp);
+
+    CREATE TABLE IF NOT EXISTS archive_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      started_at INTEGER NOT NULL,
+      finished_at INTEGER,
+      status TEXT NOT NULL,
+      total_archived INTEGER NOT NULL DEFAULT 0,
+      total_deleted INTEGER NOT NULL DEFAULT 0,
+      devices_processed INTEGER NOT NULL DEFAULT 0,
+      error_message TEXT,
+      triggered_by TEXT NOT NULL DEFAULT 'scheduled',
+      custom_retention_days INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_archive_runs_started ON archive_runs(started_at);
+    CREATE INDEX IF NOT EXISTS idx_archive_runs_status ON archive_runs(status);
   `);
     await migrate();
   });
