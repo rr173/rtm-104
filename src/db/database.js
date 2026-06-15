@@ -569,6 +569,67 @@ function init() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_batch_report_batch ON batch_reports(batch_id);
+
+    CREATE TABLE IF NOT EXISTS inspection_templates (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      device_type TEXT NOT NULL,
+      period TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_insp_tmpl_period ON inspection_templates(period);
+
+    CREATE TABLE IF NOT EXISTS inspection_template_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      template_id TEXT NOT NULL,
+      item_name TEXT NOT NULL,
+      check_type TEXT NOT NULL,
+      lower_limit REAL,
+      upper_limit REAL,
+      is_critical INTEGER NOT NULL DEFAULT 0,
+      auto_read_address INTEGER,
+      sort_order INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_insp_tmpl_items ON inspection_template_items(template_id);
+
+    CREATE TABLE IF NOT EXISTS inspection_tasks (
+      id TEXT PRIMARY KEY,
+      template_id TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      deadline INTEGER NOT NULL,
+      started_at INTEGER,
+      completed_at INTEGER,
+      pass_rate REAL,
+      qualified INTEGER NOT NULL DEFAULT 1,
+      auto_maintenance_order_id TEXT,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_insp_task_status ON inspection_tasks(status);
+    CREATE INDEX IF NOT EXISTS idx_insp_task_device ON inspection_tasks(device_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_insp_task_template ON inspection_tasks(template_id);
+    CREATE INDEX IF NOT EXISTS idx_insp_task_deadline ON inspection_tasks(deadline);
+
+    CREATE TABLE IF NOT EXISTS inspection_result_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id TEXT NOT NULL,
+      item_name TEXT NOT NULL,
+      check_type TEXT NOT NULL,
+      value_text TEXT,
+      value_numeric REAL,
+      pass INTEGER NOT NULL DEFAULT 0,
+      is_critical INTEGER NOT NULL DEFAULT 0,
+      auto_read INTEGER NOT NULL DEFAULT 0,
+      auto_read_address INTEGER,
+      lower_limit REAL,
+      upper_limit REAL,
+      sort_order INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_insp_result_task ON inspection_result_items(task_id);
   `);
     await migrate();
   });
