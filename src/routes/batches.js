@@ -104,4 +104,28 @@ router.get('/:id/report', async (req, res) => {
   }
 });
 
+router.get('/:id/deviation-events', async (req, res) => {
+  try {
+    const result = await batchService.getDeviationEvents(req.params.id);
+    if (!result.success) {
+      return res.status(400).json({ error: result.error });
+    }
+    res.json(result.data);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/deviation/current', async (req, res) => {
+  try {
+    const result = await batchService.getCurrentDeviationStatus();
+    if (!result.success) {
+      return res.status(400).json({ error: result.error });
+    }
+    res.json(result.data);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;

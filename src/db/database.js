@@ -73,6 +73,15 @@ async function migrate() {
   if (!deviceColNames.includes('firmware_version')) {
     await run("ALTER TABLE devices ADD COLUMN firmware_version TEXT NOT NULL DEFAULT '1.0.0'");
   }
+
+  const batchReportColumns = await all("PRAGMA table_info(batch_reports)");
+  const batchReportColNames = batchReportColumns.map(c => c.name);
+  if (!batchReportColNames.includes('deviation_stats')) {
+    await run("ALTER TABLE batch_reports ADD COLUMN deviation_stats TEXT NOT NULL DEFAULT '[]'");
+  }
+  if (!batchReportColNames.includes('process_qualified')) {
+    await run("ALTER TABLE batch_reports ADD COLUMN process_qualified INTEGER NOT NULL DEFAULT 1");
+  }
 }
 
 function init() {
@@ -525,6 +534,24 @@ function init() {
 
     CREATE INDEX IF NOT EXISTS idx_bpc_batch ON batch_param_changes(batch_id, timestamp);
 
+    CREATE TABLE IF NOT EXISTS batch_deviation_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      batch_id TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      address INTEGER NOT NULL,
+      upper_limit REAL NOT NULL,
+      lower_limit REAL NOT NULL,
+      start_value REAL NOT NULL,
+      peak_value REAL NOT NULL,
+      max_deviation REAL NOT NULL,
+      started_at INTEGER NOT NULL,
+      ended_at INTEGER,
+      duration_seconds REAL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_bde_batch ON batch_deviation_events(batch_id, started_at);
+    CREATE INDEX IF NOT EXISTS idx_bde_batch_active ON batch_deviation_events(batch_id, ended_at);
+
     CREATE TABLE IF NOT EXISTS batch_reports (
       id TEXT PRIMARY KEY,
       batch_id TEXT NOT NULL UNIQUE,
@@ -536,6 +563,8 @@ function init() {
       param_changes_detail TEXT NOT NULL,
       alarm_count INTEGER NOT NULL DEFAULT 0,
       alarm_summary TEXT NOT NULL,
+      deviation_stats TEXT NOT NULL DEFAULT '[]',
+      process_qualified INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL
     );
 

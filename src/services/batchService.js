@@ -28,6 +28,19 @@ async function createBatch(data) {
     if (!data.deviceIds.includes(reg.deviceId)) {
       return { success: false, error: `锁定寄存器设备${reg.deviceId}不在关联设备列表中` };
     }
+    if (reg.upperLimit !== undefined && reg.lowerLimit !== undefined) {
+      if (typeof reg.upperLimit !== 'number' || typeof reg.lowerLimit !== 'number') {
+        return { success: false, error: '上下限必须为数字' };
+      }
+      if (reg.upperLimit <= reg.lowerLimit) {
+        return { success: false, error: '上限必须大于下限' };
+      }
+      if (reg.maxDeviationSeconds !== undefined && (typeof reg.maxDeviationSeconds !== 'number' || reg.maxDeviationSeconds < 0)) {
+        return { success: false, error: '最大偏差容忍时长必须为非负数字' };
+      }
+    } else if (reg.upperLimit !== undefined || reg.lowerLimit !== undefined) {
+      return { success: false, error: '上下限必须同时设置或同时不设置' };
+    }
   }
 
   for (const devId of data.deviceIds) {
@@ -113,6 +126,8 @@ function startSampling(batchId, deviceIds) {
 
 async function takeSnapshot(batchId, deviceIds) {
   const now = Date.now();
+  const snapshotData = {};
+
   for (const devId of deviceIds) {
     const regs = await all('SELECT * FROM registers WHERE device_id = ? ORDER BY address', [devId]);
     const data = {};
@@ -120,11 +135,100 @@ async function takeSnapshot(batchId, deviceIds) {
       const { value } = deviceStore.getRegisterValue(devId, reg.address, reg.data_type);
       data[reg.address] = value;
     }
+    snapshotData[devId] = data;
     await run(
       'INSERT INTO batch_snapshots (batch_id, device_id, data, timestamp) VALUES (?, ?, ?, ?)',
       [batchId, devId, JSON.stringify(data), now]
     );
   }
+
+  await checkDeviations(batchId, snapshotData, now);
+}
+
+async function checkDeviations(batchId, snapshotData, now) {
+  const monitoredRegs = batchStore.getMonitoredRegisters();
+
+  for (const reg of monitoredRegs) {
+    const deviceData = snapshotData[reg.deviceId];
+    if (!deviceData) continue;
+
+    const value = deviceData[reg.address];
+    if (value === undefined || value === null) continue;
+
+    const isOutOfRange = value > reg.upperLimit || value < reg.lowerLimit;
+    const hasActiveDeviation = batchStore.hasActiveDeviation(reg.deviceId, reg.address);
+
+    if (isOutOfRange && !hasActiveDeviation) {
+      await startDeviationEvent(batchId, reg, value, now);
+    } else if (isOutOfRange && hasActiveDeviation) {
+      await updateDeviationEvent(reg, value, now);
+    } else if (!isOutOfRange && hasActiveDeviation) {
+      await endDeviationEvent(batchId, reg, value, now);
+    }
+  }
+}
+
+async function startDeviationEvent(batchId, reg, value, now) {
+  const maxDeviation = Math.max(
+    Math.abs(value - reg.upperLimit),
+    Math.abs(value - reg.lowerLimit)
+  );
+
+  const result = await run(
+    `INSERT INTO batch_deviation_events 
+     (batch_id, device_id, address, upper_limit, lower_limit, start_value, peak_value, max_deviation, started_at) 
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [batchId, reg.deviceId, reg.address, reg.upperLimit, reg.lowerLimit, value, value, maxDeviation, now]
+  );
+
+  batchStore.setActiveDeviation(reg.deviceId, reg.address, {
+    eventId: result.lastID,
+    upperLimit: reg.upperLimit,
+    lowerLimit: reg.lowerLimit,
+    startValue: value,
+    peakValue: value,
+    maxDeviation: maxDeviation,
+    startedAt: now
+  });
+
+  console.log(`[工艺偏差] 参数超差开始: 设备=${reg.deviceId}, 地址=${reg.address}, 当前值=${value}, 范围=[${reg.lowerLimit}, ${reg.upperLimit}]`);
+}
+
+async function updateDeviationEvent(reg, value, now) {
+  const active = batchStore.getActiveDeviation(reg.deviceId, reg.address);
+  if (!active) return;
+
+  const currentDeviation = Math.max(
+    Math.abs(value - reg.upperLimit),
+    Math.abs(value - reg.lowerLimit)
+  );
+
+  if (currentDeviation > active.maxDeviation) {
+    active.peakValue = value;
+    active.maxDeviation = currentDeviation;
+    batchStore.setActiveDeviation(reg.deviceId, reg.address, active);
+
+    await run(
+      'UPDATE batch_deviation_events SET peak_value = ?, max_deviation = ? WHERE id = ?',
+      [value, currentDeviation, active.eventId]
+    );
+  }
+}
+
+async function endDeviationEvent(batchId, reg, value, now) {
+  const active = batchStore.getActiveDeviation(reg.deviceId, reg.address);
+  if (!active) return;
+
+  const durationSeconds = (now - active.startedAt) / 1000;
+
+  await run(
+    'UPDATE batch_deviation_events SET ended_at = ?, duration_seconds = ? WHERE id = ?',
+    [now, durationSeconds, active.eventId]
+  );
+
+  batchStore.clearActiveDeviation(reg.deviceId, reg.address);
+
+  console.log(`[工艺偏差] 参数超差结束: 设备=${reg.deviceId}, 地址=${reg.address}, 持续=${durationSeconds.toFixed(1)}秒, 最大偏离=${active.maxDeviation.toFixed(2)}`);
 }
 
 async function stopBatch(id) {
@@ -146,11 +250,30 @@ async function stopBatch(id) {
 
   await takeSnapshot(id, batch.deviceIds);
 
+  await endAllActiveDeviations(id, batch, now);
+
   const report = await generateReport(id);
 
   batchStore.clearRunningBatch();
 
   return { success: true, batch: await getBatchById(id), report };
+}
+
+async function endAllActiveDeviations(batchId, batch, now) {
+  const activeDeviations = batchStore.getAllActiveDeviations();
+  for (const active of activeDeviations) {
+    const reg = batch.lockedRegisters.find(
+      r => r.deviceId === active.deviceId && r.address === active.address
+    );
+    if (reg) {
+      const durationSeconds = (now - active.startedAt) / 1000;
+      await run(
+        'UPDATE batch_deviation_events SET ended_at = ?, duration_seconds = ? WHERE id = ?',
+        [now, durationSeconds, active.eventId]
+      );
+      console.log(`[工艺偏差] 批次结束，参数超差强制结束: 设备=${active.deviceId}, 地址=${active.address}, 持续=${durationSeconds.toFixed(1)}秒`);
+    }
+  }
 }
 
 async function generateReport(batchId) {
@@ -243,11 +366,58 @@ async function generateReport(batchId) {
     }
   }
 
+  const deviationStats = [];
+  let processQualified = true;
+
+  for (const reg of batch.lockedRegisters) {
+    if (reg.upperLimit === undefined || reg.lowerLimit === undefined) continue;
+
+    const events = await all(
+      'SELECT * FROM batch_deviation_events WHERE batch_id = ? AND device_id = ? AND address = ? ORDER BY started_at',
+      [batchId, reg.deviceId, reg.address]
+    );
+
+    const deviationCount = events.length;
+    let totalDurationSeconds = 0;
+    let maxDeviation = 0;
+
+    for (const evt of events) {
+      if (evt.duration_seconds !== null) {
+        totalDurationSeconds += evt.duration_seconds;
+      }
+      if (evt.max_deviation > maxDeviation) {
+        maxDeviation = evt.max_deviation;
+      }
+    }
+
+    const regInfo = await get(
+      'SELECT name FROM registers WHERE device_id = ? AND address = ?',
+      [reg.deviceId, reg.address]
+    );
+
+    const maxDeviationSeconds = reg.maxDeviationSeconds !== undefined ? reg.maxDeviationSeconds : 0;
+    if (maxDeviationSeconds > 0 && totalDurationSeconds > maxDeviationSeconds) {
+      processQualified = false;
+    }
+
+    deviationStats.push({
+      deviceId: reg.deviceId,
+      address: reg.address,
+      registerName: regInfo ? regInfo.name : `reg${reg.address}`,
+      upperLimit: reg.upperLimit,
+      lowerLimit: reg.lowerLimit,
+      maxDeviationSeconds: maxDeviationSeconds,
+      deviationCount,
+      totalDurationSeconds,
+      maxDeviation
+    });
+  }
+
   const reportId = uuidv4();
   const now = Date.now();
 
   await run(
-    'INSERT INTO batch_reports (id, batch_id, start_time, end_time, duration_seconds, param_stats, param_changes_count, param_changes_detail, alarm_count, alarm_summary, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO batch_reports (id, batch_id, start_time, end_time, duration_seconds, param_stats, param_changes_count, param_changes_detail, alarm_count, alarm_summary, deviation_stats, process_qualified, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [
       reportId, batchId, startTime, endTime, durationSeconds,
       JSON.stringify(paramStats),
@@ -255,6 +425,8 @@ async function generateReport(batchId) {
       JSON.stringify(paramChangesDetail),
       alarmCount,
       JSON.stringify(alarmSummary),
+      JSON.stringify(deviationStats),
+      processQualified ? 1 : 0,
       now
     ]
   );
@@ -270,6 +442,8 @@ async function generateReport(batchId) {
     paramChangesDetail,
     alarmCount,
     alarmSummary,
+    deviationStats,
+    processQualified,
     createdAt: now
   };
 }
@@ -404,7 +578,74 @@ async function getBatchReport(batchId) {
     paramChangesDetail: JSON.parse(row.param_changes_detail),
     alarmCount: row.alarm_count,
     alarmSummary: JSON.parse(row.alarm_summary),
+    deviationStats: JSON.parse(row.deviation_stats || '[]'),
+    processQualified: row.process_qualified === 1,
     createdAt: row.created_at
+  };
+}
+
+async function getDeviationEvents(batchId) {
+  const batch = await getBatchById(batchId);
+  if (!batch) return { success: false, error: '批次不存在' };
+
+  const rows = await all(
+    'SELECT * FROM batch_deviation_events WHERE batch_id = ? ORDER BY started_at DESC',
+    [batchId]
+  );
+
+  const events = rows.map(row => ({
+    id: row.id,
+    deviceId: row.device_id,
+    address: row.address,
+    upperLimit: row.upper_limit,
+    lowerLimit: row.lower_limit,
+    startValue: row.start_value,
+    peakValue: row.peak_value,
+    maxDeviation: row.max_deviation,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+    durationSeconds: row.duration_seconds,
+    active: row.ended_at === null
+  }));
+
+  return { success: true, data: events };
+}
+
+async function getCurrentDeviationStatus() {
+  if (!batchStore.hasRunningBatch()) {
+    return { success: false, error: '当前没有运行中的批次' };
+  }
+
+  const batchId = batchStore.getRunningBatchId();
+  const activeDeviations = batchStore.getAllActiveDeviations();
+  const now = Date.now();
+
+  const result = [];
+  for (const d of activeDeviations) {
+    const regInfo = await get(
+      'SELECT name FROM registers WHERE device_id = ? AND address = ?',
+      [d.deviceId, d.address]
+    );
+    const currentValue = deviceStore.getRegisterValue(d.deviceId, d.address, 'REAL').value;
+    result.push({
+      deviceId: d.deviceId,
+      address: d.address,
+      registerName: regInfo ? regInfo.name : `reg${d.address}`,
+      upperLimit: d.upperLimit,
+      lowerLimit: d.lowerLimit,
+      currentValue: currentValue,
+      maxDeviation: d.maxDeviation,
+      startedAt: d.startedAt,
+      durationSeconds: (now - d.startedAt) / 1000
+    });
+  }
+
+  return {
+    success: true,
+    data: {
+      batchId,
+      activeDeviations: result
+    }
   };
 }
 
@@ -450,8 +691,25 @@ async function restoreRunningBatch() {
 
   const batch = formatBatch(row);
   batchStore.setRunningBatch(batch.id, batch.lockedRegisters);
+
+  const activeEvents = await all(
+    'SELECT * FROM batch_deviation_events WHERE batch_id = ? AND ended_at IS NULL',
+    [batch.id]
+  );
+  for (const evt of activeEvents) {
+    batchStore.setActiveDeviation(evt.device_id, evt.address, {
+      eventId: evt.id,
+      upperLimit: evt.upper_limit,
+      lowerLimit: evt.lower_limit,
+      startValue: evt.start_value,
+      peakValue: evt.peak_value,
+      maxDeviation: evt.max_deviation,
+      startedAt: evt.started_at
+    });
+  }
+
   startSampling(batch.id, batch.deviceIds);
-  console.log(`[批次] 恢复运行中批次: ${batch.batchNo} (${batch.id})`);
+  console.log(`[批次] 恢复运行中批次: ${batch.batchNo} (${batch.id}), 活动偏差数: ${activeEvents.length}`);
   return 1;
 }
 
@@ -469,6 +727,8 @@ module.exports = {
   getBatchProcessData,
   getBatchReport,
   getBatchParamChanges,
+  getDeviationEvents,
+  getCurrentDeviationStatus,
   isRegisterLocked,
   restoreRunningBatch,
   stopEngine,

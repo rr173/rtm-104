@@ -552,8 +552,8 @@ async function setupPresetBatches(deviceIds) {
       productName: '产品A',
       deviceIds: [deviceIds['温控器'], deviceIds['变频器']],
       lockedRegisters: [
-        { deviceId: deviceIds['温控器'], address: 2 },
-        { deviceId: deviceIds['变频器'], address: 0 }
+        { deviceId: deviceIds['温控器'], address: 2, upperLimit: 75, lowerLimit: 55, maxDeviationSeconds: 60 },
+        { deviceId: deviceIds['变频器'], address: 0, upperLimit: 45, lowerLimit: 25, maxDeviationSeconds: 30 }
       ],
       plannedQuantity: 500
     });
@@ -595,8 +595,8 @@ async function setupPresetBatches(deviceIds) {
       productName: '产品B',
       deviceIds: [deviceIds['温控器'], deviceIds['变频器']],
       lockedRegisters: [
-        { deviceId: deviceIds['温控器'], address: 2 },
-        { deviceId: deviceIds['变频器'], address: 0 }
+        { deviceId: deviceIds['温控器'], address: 2, upperLimit: 75, lowerLimit: 55, maxDeviationSeconds: 60 },
+        { deviceId: deviceIds['变频器'], address: 0, upperLimit: 45, lowerLimit: 25, maxDeviationSeconds: 30 }
       ],
       plannedQuantity: 800
     });
