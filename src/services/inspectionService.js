@@ -190,7 +190,7 @@ function computeDeadline(period) {
 }
 
 async function generateTasksForTemplate(template) {
-  const deviceRows = await all('SELECT id FROM devices');
+  const deviceRows = await all('SELECT id, name FROM devices WHERE name = ?', [template.device_type]);
   const devices = deviceRows.filter(d => deviceStore.hasDevice(d.id));
 
   const now = Date.now();
@@ -586,7 +586,7 @@ async function seedData() {
   );
   const weeklyItems = [
     { itemName: '散热风扇检查', checkType: 'visual', isCritical: false },
-    { itemName: '输出频率', checkType: 'measurement', lowerLimit: 0, upperLimit: 60, isCritical: true, autoReadAddress: 1 },
+    { itemName: '输出频率', checkType: 'measurement', lowerLimit: 0, upperLimit: 60, isCritical: true, autoReadAddress: 2 },
     { itemName: '接线端子紧固', checkType: 'confirm', isCritical: false }
   ];
   for (let i = 0; i < weeklyItems.length; i++) {
@@ -598,10 +598,10 @@ async function seedData() {
     );
   }
 
-  const deviceRows = await all('SELECT id FROM devices LIMIT 1');
-  if (deviceRows.length === 0) return;
+  const thermoDevice = await get('SELECT id FROM devices WHERE name = ? LIMIT 1', ['温控器']);
+  if (!thermoDevice) return;
 
-  const deviceId = deviceRows[0].id;
+  const deviceId = thermoDevice.id;
   const completedAt = now - 86400000;
   const startedAt = completedAt - 1800000;
   const deadline = completedAt;
@@ -625,7 +625,7 @@ async function seedData() {
     await run(
       `INSERT INTO inspection_result_items (task_id, item_name, check_type, value_text, value_numeric, pass, is_critical, auto_read, auto_read_address, lower_limit, upper_limit, sort_order)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [histTaskId, r.itemName, r.checkType, r.valueText, r.valueNumeric, r.pass ? 1 : 0, r.isCritical ? 1 : 0, r.autoRead ? 1 : 0, r.autoReadAddress || null, r.lowerLimit || null, r.upperLimit || null, i]
+      [histTaskId, r.itemName, r.checkType, r.valueText, r.valueNumeric, r.pass ? 1 : 0, r.isCritical ? 1 : 0, r.autoRead ? 1 : 0, r.autoReadAddress != null ? r.autoReadAddress : null, r.lowerLimit != null ? r.lowerLimit : null, r.upperLimit != null ? r.upperLimit : null, i]
     );
   }
 
