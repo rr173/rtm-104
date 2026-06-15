@@ -16,6 +16,7 @@ const otaService = require('./services/otaService');
 const energyService = require('./services/energyService');
 const maintenanceService = require('./services/maintenanceService');
 const redundancyService = require('./services/redundancyService');
+const batchService = require('./services/batchService');
 
 const devicesRouter = require('./routes/devices');
 const pollingRouter = require('./routes/polling');
@@ -33,6 +34,7 @@ const otaRouter = require('./routes/ota');
 const energyRouter = require('./routes/energy');
 const maintenanceRouter = require('./routes/maintenance');
 const redundancyRouter = require('./routes/redundancy');
+const batchesRouter = require('./routes/batches');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -65,7 +67,8 @@ app.get('/', (req, res) => {
       ota: '/api/ota',
       energy: '/api/energy',
       maintenance: '/api/maintenance',
-      redundancy: '/api/redundancy'
+      redundancy: '/api/redundancy',
+      batches: '/api/batches'
     }
   });
 });
@@ -86,6 +89,7 @@ app.use('/api/ota', otaRouter);
 app.use('/api/energy', energyRouter);
 app.use('/api/maintenance', maintenanceRouter);
 app.use('/api/redundancy', redundancyRouter);
+app.use('/api/batches', batchesRouter);
 
 app.use((err, req, res, next) => {
   console.error('Server error:', err);
@@ -140,6 +144,8 @@ async function startup() {
     energyService.startEngine();
     maintenanceService.startEngine();
     await redundancyService.startEngine();
+    const batchCount = await batchService.restoreRunningBatch();
+    console.log(`从数据库恢复 ${batchCount} 个运行中批次`);
     console.log('Modbus Gateway Service 启动完成');
     console.log(`预置数据: 温控器(high报警阈值80°C), 液位计(low报警阈值1m)`);
     console.log(`预置联锁: 液位低停泵、温度超限关加热`);
@@ -149,6 +155,7 @@ async function startup() {
     console.log(`预置固件版本: 1.0.0/1.1.0/2.0.0, 设备初始版本1.0.0`);
     console.log(`预置维保工单: 温控器计划维保(60s后开始,180s后结束)、变频器紧急维保(立即开始,120s后结束)`);
     console.log(`预置主备冗余: 泵站冗余(泵1主/泵2备)、温控冗余(温控器主/温控器备)`);
+    console.log(`预置批次: BATCH-2025-001(已完成,含报告)、BATCH-2025-002(待启动)`);
   } catch (e) {
     console.error('启动失败:', e);
     process.exit(1);
@@ -173,6 +180,7 @@ process.on('SIGTERM', () => {
   energyService.stopEngine();
   maintenanceService.stopEngine();
   redundancyService.stopEngine();
+  batchService.stopEngine();
   server.close(() => process.exit(0));
 });
 
@@ -189,6 +197,7 @@ process.on('SIGINT', () => {
   energyService.stopEngine();
   maintenanceService.stopEngine();
   redundancyService.stopEngine();
+  batchService.stopEngine();
   server.close(() => process.exit(0));
 });
 

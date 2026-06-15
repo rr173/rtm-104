@@ -2,6 +2,7 @@ const { v4: uuidv4 } = require('uuid');
 const { run, get, all } = require('../db/database');
 const deviceStore = require('../store/deviceStore');
 const redundancyService = require('./redundancyService');
+const batchService = require('./batchService');
 
 const TYPE_RANGES = {
   int16: { min: -32768, max: 32767 },
@@ -189,6 +190,7 @@ async function applyRecipe(id) {
   const validatedItems = [];
   const preValidationErrors = [];
   const deviceIdMapping = new Map();
+  const batchLockedItems = [];
   for (const item of recipe.items) {
     const vr = await validateItemAgainstRegister(item);
     if (!vr.valid) {
@@ -197,6 +199,9 @@ async function applyRecipe(id) {
       const actualDeviceId = vr.actualDeviceId || item.deviceId;
       deviceIdMapping.set(`${item.deviceId}:${item.address}`, actualDeviceId);
       validatedItems.push({ ...item, deviceId: actualDeviceId, originalDeviceId: item.deviceId, dataType: vr.reg.data_type });
+      if (batchService.isRegisterLocked(actualDeviceId, item.address)) {
+        batchLockedItems.push({ deviceId: actualDeviceId, address: item.address });
+      }
     }
   }
 
@@ -213,6 +218,25 @@ async function applyRecipe(id) {
     return {
       success: false,
       error: preValidationErrors[0].error,
+      phase: 'validate',
+      executionId
+    };
+  }
+
+  if (batchLockedItems.length > 0) {
+    const lockedDesc = batchLockedItems.map(i => `设备${i.deviceId}地址${i.address}`).join(', ');
+    await recordExecution(executionId, recipe, 'failed', executedAt,
+      `配方目标寄存器被批次锁定: ${lockedDesc}`, 0,
+      recipe.items.map(it => ({
+        ...it,
+        originalValue: 0,
+        finalValue: 0,
+        writeStatus: 'skipped'
+      }))
+    );
+    return {
+      success: false,
+      error: `配方目标寄存器被批次锁定，整批拒绝: ${lockedDesc}`,
       phase: 'validate',
       executionId
     };

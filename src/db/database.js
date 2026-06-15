@@ -484,6 +484,62 @@ function init() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_rd_sync_group ON redundancy_sync_log(group_id, timestamp);
+
+    CREATE TABLE IF NOT EXISTS batches (
+      id TEXT PRIMARY KEY,
+      batch_no TEXT NOT NULL UNIQUE,
+      product_name TEXT NOT NULL,
+      device_ids TEXT NOT NULL,
+      locked_registers TEXT NOT NULL,
+      planned_quantity INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at INTEGER NOT NULL,
+      started_at INTEGER,
+      ended_at INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_batches_status ON batches(status);
+    CREATE INDEX IF NOT EXISTS idx_batches_no ON batches(batch_no);
+
+    CREATE TABLE IF NOT EXISTS batch_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      batch_id TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      data TEXT NOT NULL,
+      timestamp INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_batch_snap_batch_ts ON batch_snapshots(batch_id, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_batch_snap_dev_ts ON batch_snapshots(batch_id, device_id, timestamp);
+
+    CREATE TABLE IF NOT EXISTS batch_param_changes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      batch_id TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      address INTEGER NOT NULL,
+      old_value REAL NOT NULL,
+      new_value REAL NOT NULL,
+      reason TEXT NOT NULL,
+      timestamp INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_bpc_batch ON batch_param_changes(batch_id, timestamp);
+
+    CREATE TABLE IF NOT EXISTS batch_reports (
+      id TEXT PRIMARY KEY,
+      batch_id TEXT NOT NULL UNIQUE,
+      start_time INTEGER NOT NULL,
+      end_time INTEGER NOT NULL,
+      duration_seconds REAL NOT NULL,
+      param_stats TEXT NOT NULL,
+      param_changes_count INTEGER NOT NULL DEFAULT 0,
+      param_changes_detail TEXT NOT NULL,
+      alarm_count INTEGER NOT NULL DEFAULT 0,
+      alarm_summary TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_batch_report_batch ON batch_reports(batch_id);
   `);
     await migrate();
   });

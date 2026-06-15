@@ -11,6 +11,7 @@ const deviceStore = require('../store/deviceStore');
 const energyService = require('./energyService');
 const maintenanceService = require('./maintenanceService');
 const redundancyService = require('./redundancyService');
+const batchService = require('./batchService');
 
 const PRESET_DEVICES = [
   {
@@ -528,6 +529,84 @@ async function setupPresetRedundancy(deviceIds) {
   }
 }
 
+async function setupPresetBatches(deviceIds) {
+  const row = await get('SELECT COUNT(*) as cnt FROM batches');
+  const count = row ? row.cnt : 0;
+  if (count > 0) return;
+
+  if (!deviceIds) {
+    const devices = await deviceService.getAllDevices();
+    deviceIds = {};
+    for (const d of devices) {
+      deviceIds[d.name] = d.id;
+    }
+  }
+
+  if (deviceIds['温控器'] && deviceIds['变频器']) {
+    const now = Date.now();
+    const startedAt = now - 3600 * 1000;
+    const endedAt = now - 600 * 1000;
+
+    const completedResult = await batchService.createBatch({
+      batchNo: 'BATCH-2025-001',
+      productName: '产品A',
+      deviceIds: [deviceIds['温控器'], deviceIds['变频器']],
+      lockedRegisters: [
+        { deviceId: deviceIds['温控器'], address: 2 },
+        { deviceId: deviceIds['变频器'], address: 0 }
+      ],
+      plannedQuantity: 500
+    });
+
+    if (completedResult.success) {
+      const batchId = completedResult.batch.id;
+      const { run: dbRun } = require('../db/database');
+
+      await dbRun('UPDATE batches SET status = ?, started_at = ?, ended_at = ? WHERE id = ?',
+        ['completed', startedAt, endedAt, batchId]);
+
+      const snapCount = 12;
+      for (let i = 0; i < snapCount; i++) {
+        const t = startedAt + i * (600 * 1000 / snapCount);
+        const tempProgress = 60 + (i / snapCount) * 2;
+        const freqProgress = 30 + (i / snapCount) * 1.5;
+        const tcData = JSON.stringify({ 0: 55 + i * 0.5, 2: tempProgress, 4: 40 + i * 2, 5: 1, 6: 7.2 + i * 0.1 });
+        const vfdData = JSON.stringify({ 0: freqProgress, 2: freqProgress - 0.2, 4: 10 + i * 0.3, 6: 14.5 + i * 0.2 });
+        await dbRun('INSERT INTO batch_snapshots (batch_id, device_id, data, timestamp) VALUES (?, ?, ?, ?)',
+          [batchId, deviceIds['温控器'], tcData, t]);
+        await dbRun('INSERT INTO batch_snapshots (batch_id, device_id, data, timestamp) VALUES (?, ?, ?, ?)',
+          [batchId, deviceIds['变频器'], vfdData, t]);
+      }
+
+      const changeTime = startedAt + 300 * 1000;
+      await dbRun(
+        'INSERT INTO batch_param_changes (batch_id, device_id, address, old_value, new_value, reason, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [batchId, deviceIds['温控器'], 2, 60.0, 62.0, '工艺优化：根据实测温升曲线微调设定温度+2°C以提高成品率', changeTime]
+      );
+
+      const report = await batchService.generateReport(batchId);
+      if (report) {
+        console.log('预置批次: BATCH-2025-001(已完成,含报告)');
+      }
+    }
+
+    const pendingResult = await batchService.createBatch({
+      batchNo: 'BATCH-2025-002',
+      productName: '产品B',
+      deviceIds: [deviceIds['温控器'], deviceIds['变频器']],
+      lockedRegisters: [
+        { deviceId: deviceIds['温控器'], address: 2 },
+        { deviceId: deviceIds['变频器'], address: 0 }
+      ],
+      plannedQuantity: 800
+    });
+
+    if (pendingResult.success) {
+      console.log('预置批次: BATCH-2025-002(待启动)');
+    }
+  }
+}
+
 async function setupPresetData() {
   await setupPresetFirmware();
   const deviceIds = await setupPresetDevices();
@@ -539,6 +618,7 @@ async function setupPresetData() {
   await setupPresetEnergy(deviceIds);
   await setupPresetMaintenance(deviceIds);
   await setupPresetRedundancy(deviceIds);
+  await setupPresetBatches(deviceIds);
 }
 
 module.exports = {

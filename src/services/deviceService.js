@@ -3,6 +3,7 @@ const { run, get, all } = require('../db/database');
 const deviceStore = require('../store/deviceStore');
 const pollingStore = require('../store/pollingStore');
 const redundancyService = require('./redundancyService');
+const batchService = require('./batchService');
 const { getRegisterSpan } = require('../utils/modbus');
 
 function validateRegister(reg) {
@@ -142,6 +143,10 @@ async function writeRegister(deviceId, address, value) {
   }
   if (reg.rw !== 'RW') {
     return { success: false, error: '该寄存器为只读' };
+  }
+
+  if (batchService.isRegisterLocked(actualDeviceId, address)) {
+    return { success: false, error: '该寄存器已被批次锁定，请使用批次参数变更流程' };
   }
 
   deviceStore.setRegisterValue(actualDeviceId, address, reg.data_type, value);
