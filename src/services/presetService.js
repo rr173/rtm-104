@@ -13,6 +13,7 @@ const maintenanceService = require('./maintenanceService');
 const redundancyService = require('./redundancyService');
 const batchService = require('./batchService');
 const archiveService = require('./archiveService');
+const modeService = require('./modeService');
 
 const PRESET_DEVICES = [
   {
@@ -192,6 +193,17 @@ async function setupPresetAlarms(deviceIds) {
       threshold: 1.0,
       hysteresis: 0.2,
       delaySeconds: 5
+    });
+  }
+
+  if (deviceIds['变频器']) {
+    await alarmService.createRule({
+      deviceId: deviceIds['变频器'],
+      regAddress: 4,
+      alarmType: 'high',
+      threshold: 15.0,
+      hysteresis: 1.0,
+      delaySeconds: 3
     });
   }
 }
@@ -640,6 +652,79 @@ async function setupPresetBatches(deviceIds) {
   }
 }
 
+async function setupPresetModes(deviceIds) {
+  const row = await get('SELECT COUNT(*) as cnt FROM device_modes');
+  const count = row ? row.cnt : 0;
+  if (count > 0) return;
+
+  if (!deviceIds) {
+    const devices = await deviceService.getAllDevices();
+    deviceIds = {};
+    for (const d of devices) {
+      deviceIds[d.name] = d.id;
+    }
+  }
+
+  if (!deviceIds['变频器']) return;
+
+  const vfdId = deviceIds['变频器'];
+  const tcId = deviceIds['温控器'];
+
+  const alarmRules = await alarmService.getAllRules();
+  const vfdCurrentRule = alarmRules.find(r => r.deviceId === vfdId && r.regAddress === 4 && r.alarmType === 'high');
+
+  const lowSpeedResult = await modeService.createMode({
+    deviceId: vfdId,
+    name: '低速节能',
+    registers: [
+      { address: 0, value: 15.0 }
+    ],
+    alarmOverrides: vfdCurrentRule ? [
+      { alarmRuleId: vfdCurrentRule.id, newThreshold: 8.0 }
+    ] : []
+  });
+  if (lowSpeedResult.success) {
+    console.log('预置运行模式: 低速节能(频率设定15Hz)');
+  }
+
+  const normalResult = await modeService.createMode({
+    deviceId: vfdId,
+    name: '正常生产',
+    registers: [
+      { address: 0, value: 40.0 }
+    ],
+    alarmOverrides: vfdCurrentRule ? [
+      { alarmRuleId: vfdCurrentRule.id, newThreshold: 15.0 }
+    ] : []
+  });
+  if (normalResult.success) {
+    console.log('预置运行模式: 正常生产(频率设定40Hz)');
+  }
+
+  const precondition = tcId ? `${tcId}.reg0 <= 70` : null;
+  const highSpeedResult = await modeService.createMode({
+    deviceId: vfdId,
+    name: '高速满载',
+    precondition,
+    registers: [
+      { address: 0, value: 55.0 }
+    ],
+    alarmOverrides: vfdCurrentRule ? [
+      { alarmRuleId: vfdCurrentRule.id, newThreshold: 25.0 }
+    ] : []
+  });
+  if (highSpeedResult.success) {
+    console.log('预置运行模式: 高速满载(频率设定55Hz, 前置条件: 温控器当前温度不超过70°C)');
+  }
+
+  if (normalResult.success) {
+    const switchResult = await modeService.switchMode(vfdId, normalResult.mode.id, 'system');
+    if (switchResult.success) {
+      console.log('变频器初始设为正常生产模式');
+    }
+  }
+}
+
 async function setupPresetData() {
   await setupPresetFirmware();
   const deviceIds = await setupPresetDevices();
@@ -653,6 +738,7 @@ async function setupPresetData() {
   await setupPresetRedundancy(deviceIds);
   await setupPresetBatches(deviceIds);
   await setupPresetArchivePolicies(deviceIds);
+  await setupPresetModes(deviceIds);
 }
 
 module.exports = {

@@ -4,6 +4,7 @@ const deviceStore = require('../store/deviceStore');
 const pollingStore = require('../store/pollingStore');
 const redundancyService = require('./redundancyService');
 const batchService = require('./batchService');
+const modeService = require('./modeService');
 const { getRegisterSpan } = require('../utils/modbus');
 
 function validateRegister(reg) {
@@ -133,7 +134,7 @@ async function deleteDevice(id) {
   return true;
 }
 
-async function writeRegister(deviceId, address, value) {
+async function writeRegister(deviceId, address, value, source) {
   const resolved = redundancyService.resolveDeviceForOperation(deviceId);
   const actualDeviceId = resolved.deviceId;
 
@@ -147,6 +148,12 @@ async function writeRegister(deviceId, address, value) {
 
   if (batchService.isRegisterLocked(actualDeviceId, address)) {
     return { success: false, error: '该寄存器已被批次锁定，请使用批次参数变更流程' };
+  }
+
+  if (source !== 'interlock' && source !== 'mode' && modeService.isRegisterLocked(actualDeviceId, address)) {
+    const activeMode = modeService.getActiveMode(actualDeviceId);
+    const modeName = activeMode ? activeMode.modeName : '未知';
+    return { success: false, error: `该寄存器处于"${modeName}"模式锁定中，无法手动修改` };
   }
 
   deviceStore.setRegisterValue(actualDeviceId, address, reg.data_type, value);

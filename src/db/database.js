@@ -729,6 +729,61 @@ function init() {
 
     CREATE INDEX IF NOT EXISTS idx_duty_handover_log ON duty_handovers(log_id);
     CREATE INDEX IF NOT EXISTS idx_duty_handover_status ON duty_handovers(status);
+
+    CREATE TABLE IF NOT EXISTS device_modes (
+      id TEXT PRIMARY KEY,
+      device_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      precondition TEXT,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_device_modes_device ON device_modes(device_id);
+
+    CREATE TABLE IF NOT EXISTS device_mode_registers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      mode_id TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      address INTEGER NOT NULL,
+      value REAL NOT NULL,
+      UNIQUE(mode_id, device_id, address)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_dmr_mode ON device_mode_registers(mode_id);
+
+    CREATE TABLE IF NOT EXISTS device_mode_alarm_overrides (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      mode_id TEXT NOT NULL,
+      alarm_rule_id TEXT NOT NULL,
+      new_threshold REAL NOT NULL,
+      UNIQUE(mode_id, alarm_rule_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_dmao_mode ON device_mode_alarm_overrides(mode_id);
+
+    CREATE TABLE IF NOT EXISTS device_mode_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      device_id TEXT NOT NULL,
+      from_mode_id TEXT,
+      from_mode_name TEXT,
+      to_mode_id TEXT,
+      to_mode_name TEXT,
+      operator TEXT NOT NULL DEFAULT 'system',
+      status TEXT NOT NULL DEFAULT 'success',
+      error_message TEXT,
+      timestamp INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_dmh_device ON device_mode_history(device_id, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_dmh_ts ON device_mode_history(timestamp);
+
+    CREATE TABLE IF NOT EXISTS device_mode_state (
+      device_id TEXT PRIMARY KEY,
+      mode_id TEXT NOT NULL,
+      saved_register_values TEXT NOT NULL,
+      saved_alarm_thresholds TEXT NOT NULL,
+      entered_at INTEGER NOT NULL
+    );
   `);
     await migrate();
   });

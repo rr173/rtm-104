@@ -20,6 +20,7 @@ const batchService = require('./services/batchService');
 const inspectionService = require('./services/inspectionService');
 const archiveService = require('./services/archiveService');
 const shiftDutyService = require('./services/shiftDutyService');
+const modeService = require('./services/modeService');
 
 const devicesRouter = require('./routes/devices');
 const pollingRouter = require('./routes/polling');
@@ -41,6 +42,7 @@ const batchesRouter = require('./routes/batches');
 const inspectionRouter = require('./routes/inspection');
 const archiveRouter = require('./routes/archive');
 const shiftDutyRouter = require('./routes/shiftDuty');
+const modesRouter = require('./routes/modes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -77,7 +79,8 @@ app.get('/', (req, res) => {
       batches: '/api/batches',
       inspection: '/api/inspection',
       archive: '/api/archive',
-      shiftDuty: '/api/shift-duty'
+      shiftDuty: '/api/shift-duty',
+      modes: '/api/modes'
     }
   });
 });
@@ -102,6 +105,7 @@ app.use('/api/batches', batchesRouter);
 app.use('/api/inspection', inspectionRouter);
 app.use('/api/archive', archiveRouter);
 app.use('/api/shift-duty', shiftDutyRouter);
+app.use('/api/modes', modesRouter);
 
 app.use((err, req, res, next) => {
   console.error('Server error:', err);
@@ -129,6 +133,8 @@ async function startup() {
     console.log(`从数据库加载 ${otaCount} 条OTA升级历史`);
     const maintCount = await maintenanceService.loadOrdersFromDB();
     console.log(`从数据库恢复 ${maintCount} 个进行中的维保工单锁定状态`);
+    const modeCount = await modeService.loadModesFromDB();
+    console.log(`从数据库加载 ${modeCount} 个运行模式定义`);
 
     redundancyService.setSwitchCallback(async (groupId, fromDeviceId, toDeviceId) => {
       try {
@@ -175,6 +181,7 @@ async function startup() {
     console.log(`预置批次: BATCH-2025-001(已完成,含报告)、BATCH-2025-002(待启动)`);
     console.log(`预置巡检模板: 温控器日巡(4项)、变频器周巡(3项)`);
     console.log(`预置巡检历史: 已完成巡检(含不合格项, 自动生成维保工单)`);
+    console.log(`预置运行模式: 低速节能(15Hz)/正常生产(40Hz)/高速满载(55Hz), 变频器初始为正常生产模式`);
   } catch (e) {
     console.error('启动失败:', e);
     process.exit(1);
