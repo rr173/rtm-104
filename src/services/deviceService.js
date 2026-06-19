@@ -178,11 +178,18 @@ async function writeMultipleRegisters(deviceId, writes) {
   return { success: true, actualDeviceId, originalDeviceId: deviceId };
 }
 
-async function simulateRegisterValue(deviceId, address, value) {
+async function simulateRegisterValue(deviceId, address, value, source) {
   const reg = await get('SELECT * FROM registers WHERE device_id = ? AND address = ?', [deviceId, address]);
   if (!reg) {
     return { success: false, error: '寄存器不存在' };
   }
+
+  if (source !== 'interlock' && source !== 'mode' && modeService.isRegisterLocked(deviceId, address)) {
+    const activeMode = modeService.getActiveMode(deviceId);
+    const modeName = activeMode ? activeMode.modeName : '未知';
+    return { success: false, error: `该寄存器处于"${modeName}"模式锁定中，无法手动修改` };
+  }
+
   deviceStore.setRegisterValue(deviceId, address, reg.data_type, value);
   return { success: true, value };
 }

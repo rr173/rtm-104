@@ -4,7 +4,6 @@ const deviceStore = require('../store/deviceStore');
 const modeStore = require('../store/modeStore');
 const maintenanceService = require('./maintenanceService');
 const { evaluateExpression, parseExpression } = require('../utils/expression');
-const interlockService = require('./interlockService');
 
 function validateModeInput(body) {
   if (!body.deviceId) return '缺少deviceId';
@@ -129,7 +128,15 @@ async function deleteMode(id) {
 }
 
 function resolveRegisterReference(refName) {
-  return interlockService.resolveRegisterReference(refName);
+  const parts = refName.split('.');
+  if (parts.length < 2) return 0;
+  const deviceId = parts[0];
+  const regStr = parts[1];
+  const addrMatch = regStr.match(/^reg(\d+)$/);
+  if (!addrMatch) return 0;
+  const address = parseInt(addrMatch[1]);
+  const { value } = deviceStore.getRegisterValue(deviceId, address, 'float32');
+  return value;
 }
 
 async function checkPrecondition(modeId) {
