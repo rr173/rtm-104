@@ -784,6 +784,68 @@ function init() {
       saved_alarm_thresholds TEXT NOT NULL,
       entered_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS drift_monitor_configs (
+      id TEXT PRIMARY KEY,
+      device_id TEXT NOT NULL,
+      reg_address INTEGER NOT NULL,
+      reg_name TEXT,
+      baseline_value REAL NOT NULL,
+      drift_tolerance REAL NOT NULL,
+      detect_interval_ms INTEGER NOT NULL DEFAULT 5000,
+      window_size INTEGER NOT NULL DEFAULT 10,
+      auto_calibrate INTEGER NOT NULL DEFAULT 0,
+      calibrate_target_reg INTEGER,
+      compensate_direction TEXT NOT NULL DEFAULT 'add',
+      cool_down_seconds INTEGER NOT NULL DEFAULT 60,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      UNIQUE(device_id, reg_address)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_drift_cfg_dev ON drift_monitor_configs(device_id);
+
+    CREATE TABLE IF NOT EXISTS drift_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      config_id TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      reg_address INTEGER NOT NULL,
+      reg_name TEXT,
+      baseline_value REAL NOT NULL,
+      drift_value REAL NOT NULL,
+      current_mean REAL NOT NULL,
+      deviation REAL NOT NULL,
+      event_type TEXT NOT NULL DEFAULT 'drift',
+      detected_at INTEGER NOT NULL,
+      recovered_at INTEGER,
+      active INTEGER NOT NULL DEFAULT 1
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_drift_events_dev ON drift_events(device_id, detected_at);
+    CREATE INDEX IF NOT EXISTS idx_drift_events_active ON drift_events(active);
+    CREATE INDEX IF NOT EXISTS idx_drift_events_ts ON drift_events(detected_at);
+
+    CREATE TABLE IF NOT EXISTS calibration_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      config_id TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      reg_address INTEGER NOT NULL,
+      reg_name TEXT,
+      calibrate_type TEXT NOT NULL,
+      before_mean REAL NOT NULL,
+      after_mean REAL,
+      compensate_value REAL NOT NULL,
+      target_reg_address INTEGER,
+      status TEXT NOT NULL,
+      error_message TEXT,
+      trigger_source TEXT NOT NULL,
+      performed_at INTEGER NOT NULL,
+      updated_baseline REAL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_calib_hist_dev ON calibration_history(device_id, performed_at);
+    CREATE INDEX IF NOT EXISTS idx_calib_hist_ts ON calibration_history(performed_at);
+    CREATE INDEX IF NOT EXISTS idx_calib_hist_cfg ON calibration_history(config_id);
   `);
     await migrate();
   });

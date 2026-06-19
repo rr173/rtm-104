@@ -21,6 +21,7 @@ const inspectionService = require('./services/inspectionService');
 const archiveService = require('./services/archiveService');
 const shiftDutyService = require('./services/shiftDutyService');
 const modeService = require('./services/modeService');
+const driftCalibrationService = require('./services/driftCalibrationService');
 
 const devicesRouter = require('./routes/devices');
 const pollingRouter = require('./routes/polling');
@@ -43,6 +44,7 @@ const inspectionRouter = require('./routes/inspection');
 const archiveRouter = require('./routes/archive');
 const shiftDutyRouter = require('./routes/shiftDuty');
 const modesRouter = require('./routes/modes');
+const driftCalibrationRouter = require('./routes/driftCalibration');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -80,7 +82,8 @@ app.get('/', (req, res) => {
       inspection: '/api/inspection',
       archive: '/api/archive',
       shiftDuty: '/api/shift-duty',
-      modes: '/api/modes'
+      modes: '/api/modes',
+      driftCalibration: '/api/drift-calibration'
     }
   });
 });
@@ -106,6 +109,7 @@ app.use('/api/inspection', inspectionRouter);
 app.use('/api/archive', archiveRouter);
 app.use('/api/shift-duty', shiftDutyRouter);
 app.use('/api/modes', modesRouter);
+app.use('/api/drift-calibration', driftCalibrationRouter);
 
 app.use((err, req, res, next) => {
   console.error('Server error:', err);
@@ -169,6 +173,7 @@ async function startup() {
     archiveService.startScheduledArchive();
     await shiftDutyService.seedData();
     shiftDutyService.startEngine();
+    const driftCount = await driftCalibrationService.startEngine();
     console.log('Modbus Gateway Service 启动完成');
     console.log(`预置数据: 温控器(high报警阈值80°C), 液位计(low报警阈值1m)`);
     console.log(`预置联锁: 液位低停泵、温度超限关加热`);
@@ -182,6 +187,7 @@ async function startup() {
     console.log(`预置巡检模板: 温控器日巡(4项)、变频器周巡(3项)`);
     console.log(`预置巡检历史: 已完成巡检(含不合格项, 自动生成维保工单)`);
     console.log(`预置运行模式: 低速节能(15Hz)/正常生产(40Hz)/高速满载(55Hz), 变频器初始为正常生产模式`);
+    console.log(`预置漂移监控: 温控器当前温度(基准25°C/容限2°C/检测5s/窗口10点/校准目标设定温度/冷却60s)`);
   } catch (e) {
     console.error('启动失败:', e);
     process.exit(1);
@@ -210,6 +216,7 @@ process.on('SIGTERM', () => {
   inspectionService.stopEngine();
   archiveService.stopScheduledArchive();
   shiftDutyService.stopEngine();
+  driftCalibrationService.stopEngine();
   server.close(() => process.exit(0));
 });
 
@@ -230,6 +237,7 @@ process.on('SIGINT', () => {
   inspectionService.stopEngine();
   archiveService.stopScheduledArchive();
   shiftDutyService.stopEngine();
+  driftCalibrationService.stopEngine();
   server.close(() => process.exit(0));
 });
 

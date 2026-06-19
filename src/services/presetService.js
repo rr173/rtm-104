@@ -14,6 +14,7 @@ const redundancyService = require('./redundancyService');
 const batchService = require('./batchService');
 const archiveService = require('./archiveService');
 const modeService = require('./modeService');
+const driftCalibrationService = require('./driftCalibrationService');
 
 const PRESET_DEVICES = [
   {
@@ -725,6 +726,41 @@ async function setupPresetModes(deviceIds) {
   }
 }
 
+async function setupPresetDriftConfigs(deviceIds) {
+  const row = await get('SELECT COUNT(*) as cnt FROM drift_monitor_configs');
+  const count = row ? row.cnt : 0;
+  if (count > 0) return;
+
+  if (!deviceIds) {
+    const devices = await deviceService.getAllDevices();
+    deviceIds = {};
+    for (const d of devices) {
+      deviceIds[d.name] = d.id;
+    }
+  }
+
+  if (deviceIds['温控器']) {
+    const result = await driftCalibrationService.createConfig({
+      deviceId: deviceIds['温控器'],
+      regAddress: 0,
+      baselineValue: 25.0,
+      driftTolerance: 2.0,
+      detectIntervalMs: 5000,
+      windowSize: 10,
+      autoCalibrate: true,
+      calibrateTargetReg: 2,
+      compensateDirection: 'add',
+      coolDownSeconds: 60,
+      enabled: true
+    });
+    if (result.success) {
+      console.log('预置漂移监控: 温控器-当前温度(基准25°C/容限2°C/检测5s/窗口10点/校准目标设定温度reg2/冷却60s)');
+    } else {
+      console.error('预置漂移监控失败:', result.error);
+    }
+  }
+}
+
 async function setupPresetData() {
   await setupPresetFirmware();
   const deviceIds = await setupPresetDevices();
@@ -739,6 +775,7 @@ async function setupPresetData() {
   await setupPresetBatches(deviceIds);
   await setupPresetArchivePolicies(deviceIds);
   await setupPresetModes(deviceIds);
+  await setupPresetDriftConfigs(deviceIds);
 }
 
 module.exports = {
