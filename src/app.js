@@ -19,6 +19,7 @@ const redundancyService = require('./services/redundancyService');
 const batchService = require('./services/batchService');
 const inspectionService = require('./services/inspectionService');
 const archiveService = require('./services/archiveService');
+const shiftDutyService = require('./services/shiftDutyService');
 
 const devicesRouter = require('./routes/devices');
 const pollingRouter = require('./routes/polling');
@@ -39,6 +40,7 @@ const redundancyRouter = require('./routes/redundancy');
 const batchesRouter = require('./routes/batches');
 const inspectionRouter = require('./routes/inspection');
 const archiveRouter = require('./routes/archive');
+const shiftDutyRouter = require('./routes/shiftDuty');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -74,7 +76,8 @@ app.get('/', (req, res) => {
       redundancy: '/api/redundancy',
       batches: '/api/batches',
       inspection: '/api/inspection',
-      archive: '/api/archive'
+      archive: '/api/archive',
+      shiftDuty: '/api/shift-duty'
     }
   });
 });
@@ -98,6 +101,7 @@ app.use('/api/redundancy', redundancyRouter);
 app.use('/api/batches', batchesRouter);
 app.use('/api/inspection', inspectionRouter);
 app.use('/api/archive', archiveRouter);
+app.use('/api/shift-duty', shiftDutyRouter);
 
 app.use((err, req, res, next) => {
   console.error('Server error:', err);
@@ -157,6 +161,8 @@ async function startup() {
     await inspectionService.seedData();
     inspectionService.startEngine();
     archiveService.startScheduledArchive();
+    await shiftDutyService.seedData();
+    shiftDutyService.startEngine();
     console.log('Modbus Gateway Service 启动完成');
     console.log(`预置数据: 温控器(high报警阈值80°C), 液位计(low报警阈值1m)`);
     console.log(`预置联锁: 液位低停泵、温度超限关加热`);
@@ -196,6 +202,7 @@ process.on('SIGTERM', () => {
   batchService.stopEngine();
   inspectionService.stopEngine();
   archiveService.stopScheduledArchive();
+  shiftDutyService.stopEngine();
   server.close(() => process.exit(0));
 });
 
@@ -215,6 +222,7 @@ process.on('SIGINT', () => {
   batchService.stopEngine();
   inspectionService.stopEngine();
   archiveService.stopScheduledArchive();
+  shiftDutyService.stopEngine();
   server.close(() => process.exit(0));
 });
 

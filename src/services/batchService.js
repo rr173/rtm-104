@@ -5,6 +5,7 @@ const batchStore = require('../store/batchStore');
 const redundancyStore = require('../store/redundancyStore');
 const alarmService = require('./alarmService');
 const maintenanceService = require('./maintenanceService');
+const shiftDutyService = require('./shiftDutyService');
 
 const SAMPLING_INTERVAL_MS = 5000;
 
@@ -108,6 +109,14 @@ async function startBatch(id) {
 
   batchStore.setRunningBatch(id, batch.lockedRegisters);
   startSampling(id, batch.deviceIds);
+
+  shiftDutyService.addSystemEvent(
+    'batch',
+    `批次启动: ${batch.batchNo}(${batch.productName})`,
+    null,
+    id,
+    'normal'
+  ).catch(e => console.error('[值班日志] 写入批次事件失败:', e.message));
 
   return { success: true, batch: await getBatchById(id) };
 }
@@ -256,6 +265,14 @@ async function stopBatch(id) {
   const report = await generateReport(id);
 
   batchStore.clearRunningBatch();
+
+  shiftDutyService.addSystemEvent(
+    'batch',
+    `批次结束: ${batch.batchNo}(${batch.productName})`,
+    null,
+    id,
+    'normal'
+  ).catch(e => console.error('[值班日志] 写入批次事件失败:', e.message));
 
   return { success: true, batch: await getBatchById(id), report };
 }

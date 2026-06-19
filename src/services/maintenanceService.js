@@ -3,6 +3,7 @@ const { run, get, all } = require('../db/database');
 const deviceStore = require('../store/deviceStore');
 const maintenanceStore = require('../store/maintenanceStore');
 const redundancyService = require('./redundancyService');
+const shiftDutyService = require('./shiftDutyService');
 
 const VALID_TYPES = ['planned', 'emergency'];
 const VALID_STATUSES = ['scheduled', 'in_progress', 'completed', 'cancelled'];
@@ -113,6 +114,13 @@ async function createOrder(body) {
     maintenanceStore.lockDevice(body.deviceId, id);
     await logEvent(id, body.deviceId, 'lock_device', { reason: 'emergency_created' });
     console.log(`[维保] 紧急维保工单已创建并锁定设备: orderId=${id}, deviceId=${body.deviceId}`);
+    shiftDutyService.addSystemEvent(
+      'maintenance',
+      `维保工单创建: ${body.deviceId}紧急维保(状态: in_progress)`,
+      body.deviceId,
+      id,
+      'important'
+    ).catch(e => console.error('[值班日志] 写入维保事件失败:', e.message));
     try {
       await redundancyService.checkAndSwitchForDevice(
         body.deviceId,
@@ -190,6 +198,13 @@ async function startOrder(id) {
   maintenanceStore.lockDevice(order.device_id, id);
   await logEvent(id, order.device_id, 'lock_device', { reason: 'order_started', startedAt: now });
   console.log(`[维保] 工单开始，设备已锁定: orderId=${id}, deviceId=${order.device_id}`);
+  shiftDutyService.addSystemEvent(
+    'maintenance',
+    `维保工单状态变更: ${order.device_id}(scheduled -> in_progress)`,
+    order.device_id,
+    id,
+    'important'
+  ).catch(e => console.error('[值班日志] 写入维保事件失败:', e.message));
   try {
     await redundancyService.checkAndSwitchForDevice(
       order.device_id,
@@ -228,6 +243,13 @@ async function completeOrder(id) {
 
   await logEvent(id, order.device_id, 'unlock_device', { reason: 'order_completed', endedAt: now });
   console.log(`[维保] 工单完成，设备已解锁: orderId=${id}, deviceId=${order.device_id}`);
+  shiftDutyService.addSystemEvent(
+    'maintenance',
+    `维保工单状态变更: ${order.device_id}(in_progress -> completed)`,
+    order.device_id,
+    id,
+    'normal'
+  ).catch(e => console.error('[值班日志] 写入维保事件失败:', e.message));
   try {
     await redundancyService.checkDeviceRecovery(order.device_id);
   } catch (e) {
@@ -272,6 +294,13 @@ async function cancelOrder(id) {
 
   await logEvent(id, order.device_id, 'cancelled', { cancelledAt: now, wasInProgress });
   console.log(`[维保] 工单已取消: orderId=${id}, deviceId=${order.device_id}`);
+  shiftDutyService.addSystemEvent(
+    'maintenance',
+    `维保工单状态变更: ${order.device_id}(${order.status} -> cancelled)`,
+    order.device_id,
+    id,
+    'normal'
+  ).catch(e => console.error('[值班日志] 写入维保事件失败:', e.message));
 
   return { success: true, order: await getOrderById(id) };
 }

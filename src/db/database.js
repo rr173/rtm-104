@@ -673,6 +673,62 @@ function init() {
 
     CREATE INDEX IF NOT EXISTS idx_archive_runs_started ON archive_runs(started_at);
     CREATE INDEX IF NOT EXISTS idx_archive_runs_status ON archive_runs(status);
+
+    CREATE TABLE IF NOT EXISTS duty_shifts (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      start_hour INTEGER NOT NULL,
+      start_minute INTEGER NOT NULL DEFAULT 0,
+      end_hour INTEGER NOT NULL,
+      end_minute INTEGER NOT NULL DEFAULT 0,
+      cross_day INTEGER NOT NULL DEFAULT 0,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS duty_logs (
+      id TEXT PRIMARY KEY,
+      shift_id TEXT NOT NULL,
+      shift_name TEXT NOT NULL,
+      shift_date TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_duty_logs_status ON duty_logs(status);
+    CREATE INDEX IF NOT EXISTS idx_duty_logs_shift_date ON duty_logs(shift_id, shift_date);
+
+    CREATE TABLE IF NOT EXISTS duty_log_entries (
+      id TEXT PRIMARY KEY,
+      log_id TEXT NOT NULL,
+      entry_type TEXT NOT NULL DEFAULT 'manual',
+      content TEXT NOT NULL,
+      device_id TEXT,
+      level TEXT NOT NULL DEFAULT 'normal',
+      event_category TEXT,
+      source_event_id TEXT,
+      editable INTEGER NOT NULL DEFAULT 1,
+      timestamp INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_duty_entries_log ON duty_log_entries(log_id, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_duty_entries_type ON duty_log_entries(entry_type);
+
+    CREATE TABLE IF NOT EXISTS duty_handovers (
+      id TEXT PRIMARY KEY,
+      log_id TEXT NOT NULL,
+      handover_person TEXT NOT NULL,
+      receiver_person TEXT NOT NULL,
+      remarks TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      reject_reason TEXT,
+      handover_at INTEGER NOT NULL,
+      confirmed_at INTEGER,
+      rejected_at INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_duty_handover_log ON duty_handovers(log_id);
+    CREATE INDEX IF NOT EXISTS idx_duty_handover_status ON duty_handovers(status);
   `);
     await migrate();
   });

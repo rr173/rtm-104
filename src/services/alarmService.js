@@ -4,6 +4,7 @@ const deviceStore = require('../store/deviceStore');
 const alarmStateStore = require('../store/alarmStateStore');
 const notificationService = require('./notificationService');
 const maintenanceService = require('./maintenanceService');
+const shiftDutyService = require('./shiftDutyService');
 
 const VALID_NOTIFY_CHANNELS = ['log', 'webhook', 'both'];
 
@@ -227,6 +228,14 @@ async function triggerAlarm(rule, value, now) {
     regName,
     rule.notifyChannel || 'log'
   );
+
+  shiftDutyService.addSystemEvent(
+    'alarm',
+    `报警触发: ${deviceName}-${regName} ${rule.alarmType}报警(阈值${rule.threshold}, 实测${value})`,
+    rule.deviceId,
+    String(alarmId),
+    rule.alarmType === 'high_high' || rule.alarmType === 'low_low' ? 'critical' : 'important'
+  ).catch(e => console.error('[值班日志] 写入报警事件失败:', e.message));
 }
 
 async function evaluateAlarmsForDevice(deviceId) {

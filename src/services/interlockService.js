@@ -4,6 +4,7 @@ const deviceStore = require('../store/deviceStore');
 const interlockStore = require('../store/interlockStore');
 const maintenanceService = require('./maintenanceService');
 const redundancyService = require('./redundancyService');
+const shiftDutyService = require('./shiftDutyService');
 const { evaluateExpression, parseExpression, getReferences } = require('../utils/expression');
 
 const SCAN_INTERVAL_MS = 500;
@@ -266,6 +267,13 @@ async function scanOnce() {
       });
       await executeActions(row.id, row.name, row.priority, actions);
       await logEvent(row.id, row.name, triggerValue, actions);
+      shiftDutyService.addSystemEvent(
+        'interlock',
+        `联锁触发: ${row.name}(触发值${triggerValue})`,
+        null,
+        row.id,
+        row.priority >= 4 ? 'critical' : 'important'
+      ).catch(e => console.error('[值班日志] 写入联锁事件失败:', e.message));
     } else if (triggered && currentState === 'triggered') {
       await executeActions(row.id, row.name, row.priority, actions);
     } else if (!triggered && currentState === 'triggered') {
