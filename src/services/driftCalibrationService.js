@@ -171,32 +171,55 @@ async function getConfigWithStatus(deviceId, regAddress) {
   if (!config) return null;
 
   const formatted = formatConfig(config);
-  const activeEvent = await get(
-    'SELECT * FROM drift_events WHERE config_id = ? AND active = 1 ORDER BY detected_at DESC LIMIT 1',
-    [config.id]
-  );
-  return {
-    ...formatted,
-    driftStatus: activeEvent ? 'drifting' : 'normal',
-    activeDriftEvent: activeEvent ? formatEvent(activeEvent) : null
-  };
+  return await enrichConfigWithStatus(formatted);
 }
 
 async function getAllConfigsWithStatus() {
   const configs = await getAllConfigs();
   const result = [];
   for (const cfg of configs) {
-    const activeEvent = await get(
-      'SELECT * FROM drift_events WHERE config_id = ? AND active = 1 ORDER BY detected_at DESC LIMIT 1',
-      [cfg.id]
-    );
-    result.push({
-      ...cfg,
-      driftStatus: activeEvent ? 'drifting' : 'normal',
-      activeDriftEvent: activeEvent ? formatEvent(activeEvent) : null
-    });
+    result.push(await enrichConfigWithStatus(cfg));
   }
   return result;
+}
+
+async function enrichConfigWithStatus(config) {
+  const activeEvent = await get(
+    'SELECT * FROM drift_events WHERE config_id = ? AND active = 1 ORDER BY detected_at DESC LIMIT 1',
+    [config.id]
+  );
+
+  const meanResult = await getWindowMean(config.deviceId, config.regAddress, config.windowSize);
+  const deviceStatus = deviceStore.getStatus(config.deviceId);
+  const underMaintenance = maintenanceService.isDeviceLocked(config.deviceId);
+  const targetLocked = config.autoCalibrate && config.calibrateTargetReg !== null
+    ? modeService.isRegisterLocked(config.deviceId, config.calibrateTargetReg)
+    : false;
+
+  const lastCalibration = await get(
+    'SELECT performed_at, status FROM calibration_history WHERE config_id = ? ORDER BY performed_at DESC LIMIT 1',
+    [config.id]
+  );
+
+  const inCoolDown = lastCalibration && lastCalibration.status === 'success'
+    ? (Date.now() - lastCalibration.performed_at) / 1000 < config.coolDownSeconds
+    : false;
+
+  return {
+    ...config,
+    driftStatus: activeEvent ? 'drifting' : 'normal',
+    activeDriftEvent: activeEvent ? formatEvent(activeEvent) : null,
+    currentMean: meanResult.success ? meanResult.mean : null,
+    sampleCount: meanResult.sampleCount || 0,
+    validSampleCount: meanResult.validCount || 0,
+    maintenanceSampleCount: meanResult.maintenanceCount || 0,
+    deviceStatus,
+    underMaintenance,
+    targetRegisterLocked: targetLocked,
+    inCoolDown,
+    lastCalibrationAt: lastCalibration ? lastCalibration.performed_at : null,
+    dataSufficient: meanResult.success
+  };
 }
 
 async function updateConfig(id, body) {
@@ -294,18 +317,26 @@ async function deleteConfig(id) {
 
 async function getWindowMean(deviceId, regAddress, windowSize) {
   const rows = await all(
-    `SELECT value FROM register_history
-     WHERE device_id = ? AND reg_address = ? AND stale = 0
+    `SELECT value, stale FROM register_history
+     WHERE device_id = ? AND reg_address = ? AND stale != 1
      ORDER BY timestamp DESC LIMIT ?`,
     [deviceId, regAddress, windowSize]
   );
 
   if (rows.length < Math.min(2, windowSize)) {
-    return { success: false, error: '历史数据点不足' };
+    return { success: false, error: '历史数据点不足', sampleCount: rows.length };
   }
 
+  const validRows = rows.filter(r => r.stale === 0);
+  const maintenanceRows = rows.filter(r => r.stale === 2);
   const sum = rows.reduce((s, r) => s + r.value, 0);
-  return { success: true, mean: sum / rows.length, sampleCount: rows.length };
+  return {
+    success: true,
+    mean: sum / rows.length,
+    sampleCount: rows.length,
+    validCount: validRows.length,
+    maintenanceCount: maintenanceRows.length
+  };
 }
 
 async function createDriftEvent(config, currentMean, deviation) {
@@ -536,6 +567,10 @@ async function detectAndCalibrate(configId) {
     return;
   }
 
+  if (meanResult.maintenanceCount > 0 && meanResult.validCount === 0) {
+    console.debug(`[漂移检测] ${config.regName || `reg${config.regAddress}`}: 窗口内${meanResult.maintenanceCount}个点均为维保中数据，仅供参考`);
+  }
+
   const currentMean = meanResult.mean;
   const deviation = currentMean - config.baselineValue;
   const absDeviation = Math.abs(deviation);
@@ -555,10 +590,22 @@ async function detectAndCalibrate(configId) {
         return;
       }
 
+      const lastFailedCal = await get(
+        `SELECT id, performed_at FROM calibration_history
+         WHERE config_id = ? AND status != 'success' AND status != 'skipped'
+         ORDER BY performed_at DESC LIMIT 1`,
+        [configId]
+      );
+
       const check = canCalibrate(config);
       if (!check.ok) {
-        if (check.reason.includes('模式锁定')) {
-          const now = Date.now();
+        const minIntervalMs = 30000;
+        const now = Date.now();
+        const shouldRecord = !lastFailedCal || (now - lastFailedCal.performed_at) > minIntervalMs;
+
+        if (shouldRecord) {
+          const isModeLock = check.reason.includes('模式锁定');
+          const status = isModeLock ? 'mode_lock_skipped' : 'failed';
           await run(
             `INSERT INTO calibration_history
              (config_id, device_id, reg_address, reg_name, calibrate_type, before_mean, after_mean,
@@ -567,20 +614,20 @@ async function detectAndCalibrate(configId) {
             [
               config.id, config.deviceId, config.regAddress, config.regName,
               'auto', currentMean, null, config.baselineValue - currentMean,
-              config.calibrateTargetReg, 'mode_lock_skipped', check.reason,
+              config.calibrateTargetReg, status, check.reason,
               'auto', now, null
             ]
           );
-          console.log(`[自动校准] ${config.regName || `reg${config.regAddress}`}: ${check.reason}`);
+          console.log(`[自动校准] ${config.regName || `reg${config.regAddress}`} 跳过: ${check.reason}`);
         }
         return;
       }
 
       console.log(`[自动校准] 执行 ${config.regName || `reg${config.regAddress}`}: 补偿=${(config.baselineValue - currentMean).toFixed(3)}`);
       const result = await performCalibration(config, currentMean, 'auto');
-      if (!result.success && result.status !== 'mode_lock_skipped') {
+      if (!result.success) {
         console.warn(`[自动校准] 失败: ${result.error}`);
-      } else if (result.success) {
+      } else {
         console.log(`[自动校准] 成功: 修正后均值=${result.afterMean.toFixed(3)}, 新基准=${result.newBaseline.toFixed(3)}`);
       }
     }
